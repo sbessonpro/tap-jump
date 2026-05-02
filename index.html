@@ -2,22 +2,50 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#1a1a2e" />
-  <title>Tap Jump</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a10" />
+  <title>Shadow Crawl</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="game-container">
     <canvas id="game"></canvas>
+
+    <!-- HUD -->
     <div id="hud">
-      <div id="score">0</div>
-      <div id="best">Record : 0</div>
+      <div class="hud-left">
+        <div id="hp-wrap"><div id="hp-bar"></div><span id="hp-text">100/100</span></div>
+        <div id="distance">0 m</div>
+      </div>
+      <div class="hud-right">
+        <div id="kills">0 kills</div>
+      </div>
     </div>
+
+    <!-- Virtual joystick -->
+    <div id="joy-zone">
+      <div id="joy-base"><div id="joy-stick"></div></div>
+    </div>
+
+    <!-- Action buttons -->
+    <div id="actions">
+      <button id="weapon-btn" class="action-btn">
+        <span id="weapon-icon">⚔</span>
+        <span id="weapon-name">Épée</span>
+      </button>
+      <button id="attack-btn" class="action-btn primary">ATK</button>
+    </div>
+
+    <!-- Overlay screens -->
     <div id="overlay" class="visible">
-      <h1>Tap Jump</h1>
-      <p>Tape l'écran pour sauter</p>
-      <button id="start-btn">Jouer</button>
+      <h1>Shadow Crawl</h1>
+      <p class="subtitle">Avance dans les ténèbres</p>
+      <div class="legend">
+        <div><span class="kbd">Joystick</span> déplacer</div>
+        <div><span class="kbd">ATK</span> attaquer</div>
+        <div><span class="kbd">⚔/🏹/🔨</span> changer d'arme</div>
+      </div>
+      <button id="start-btn">Entrer dans le donjon</button>
     </div>
   </div>
   <script src="game.js"></script>
