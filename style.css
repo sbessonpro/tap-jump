@@ -92,6 +92,154 @@ html, body {
 
 #kills { color: #ff8080; }
 
+#stage-indicator {
+  font-size: 11px;
+  font-weight: 700;
+  color: #c8a878;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+  margin-top: 2px;
+}
+
+/* === Boss bar === */
+#boss-bar {
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 70%;
+  max-width: 520px;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  z-index: 10;
+  pointer-events: none;
+}
+#boss-bar.visible { display: flex; }
+
+#boss-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #ffaaaa;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.95), 0 0 10px rgba(180,40,40,0.7);
+}
+
+#boss-hp-wrap {
+  width: 100%;
+  height: 11px;
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(180, 40, 40, 0.7);
+  border-radius: 3px;
+  overflow: hidden;
+  box-shadow: 0 0 16px rgba(180, 40, 40, 0.5);
+}
+
+#boss-hp {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #6a1010, #ff3030, #ffaa30);
+  transition: width 0.15s ease;
+}
+
+/* === Boss intro === */
+#boss-intro {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  pointer-events: none;
+  z-index: 15;
+  background: radial-gradient(circle at center, rgba(0,0,0,0) 30%, rgba(20,0,0,0.4) 100%);
+}
+
+#boss-intro.visible {
+  display: flex;
+  animation: bossIntroFade 2.6s ease-out forwards;
+}
+
+@keyframes bossIntroFade {
+  0%   { opacity: 0; }
+  15%  { opacity: 1; }
+  80%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.boss-intro-name {
+  font-size: 56px;
+  font-weight: 900;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #d4a060, #6b1a1a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 40px rgba(180, 40, 40, 0.6);
+  animation: bossNameSlide 2.6s ease-out forwards;
+}
+
+@keyframes bossNameSlide {
+  0%   { transform: scale(0.7); letter-spacing: 0px; }
+  20%  { transform: scale(1); letter-spacing: 6px; }
+  100% { transform: scale(1.1); letter-spacing: 12px; }
+}
+
+.boss-intro-sub {
+  font-size: 14px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: #b88858;
+  opacity: 0.8;
+  margin-top: 12px;
+}
+
+/* Stage advance toast */
+#stage-toast {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  z-index: 12;
+  pointer-events: none;
+}
+
+#stage-toast.visible {
+  display: flex;
+  animation: stageToastFade 3s ease-out forwards;
+}
+
+@keyframes stageToastFade {
+  0%   { opacity: 0; transform: translate(-50%, 10px); }
+  15%  { opacity: 1; transform: translate(-50%, 0); }
+  85%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.stage-toast-title {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: #ffd86b;
+  text-transform: uppercase;
+  text-shadow: 0 0 16px rgba(255, 200, 80, 0.6);
+}
+
+.stage-toast-sub {
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: #d8c8a8;
+  margin-top: 4px;
+  opacity: 0.8;
+}
+
 #coins {
   color: #ffd86b;
   font-size: 16px;
