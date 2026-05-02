@@ -194,7 +194,7 @@ const game = {
   stage: 1,
   bossActive: false,
   boss: null,
-  bossNextAt: 300,           // distance in meters for next boss spawn
+  bossNextAt: 250,           // distance in meters for next boss spawn
   bossesDefeated: 0,
   unlockedWeapons: null,     // Set, set in startGame
   upgrades: {
@@ -306,50 +306,50 @@ function spawnSwingParticles(p, w) {
 const ENEMY_TYPES = {
   skeleton: {
     w: 36, h: 58, r: 24,
-    hp: 50, speed: 95, damage: 10,
+    hp: 50, speed: 100, damage: 12,
     color: '#d8d0bc', accent: '#5a3a3a',
     coinDrop: [3, 6],
     contactCooldown: 0.8,
   },
   bat: {
     w: 32, h: 26, r: 20,
-    hp: 22, speed: 170, damage: 6,
+    hp: 22, speed: 180, damage: 8,
     color: '#3a2a4a', accent: '#7a3a8a',
     coinDrop: [1, 3],
-    contactCooldown: 0.6,
+    contactCooldown: 0.55,
     flying: true,
   },
   brute: {
     w: 56, h: 78, r: 34,
-    hp: 140, speed: 70, damage: 22,
+    hp: 150, speed: 75, damage: 26,
     color: '#5a2a2a', accent: '#3a1010',
     coinDrop: [10, 18],
     contactCooldown: 1.0,
   },
   goblin: {
     w: 30, h: 46, r: 19,
-    hp: 35, speed: 130, damage: 8,
+    hp: 38, speed: 140, damage: 10,
     color: '#3a6a3a', accent: '#1a3a1a',
     coinDrop: [4, 8],
-    contactCooldown: 0.7,
-    throwCooldown: [2.2, 4.0],
+    contactCooldown: 0.65,
+    throwCooldown: [1.8, 3.4],
     preferredDist: 150,
   },
   wraith: {
     w: 38, h: 60, r: 24,
-    hp: 45, speed: 115, damage: 14,
+    hp: 50, speed: 125, damage: 16,
     color: '#403060', accent: '#a060c0',
     coinDrop: [6, 12],
-    contactCooldown: 0.9,
+    contactCooldown: 0.85,
     flying: true,
     ghostly: true,
   },
   armored: {
     w: 46, h: 68, r: 28,
-    hp: 220, speed: 60, damage: 18,
+    hp: 230, speed: 65, damage: 22,
     color: '#5a5a6a', accent: '#2a2a3a',
     coinDrop: [14, 24],
-    contactCooldown: 1.2,
+    contactCooldown: 1.1,
     armor: 0.5,             // arrows do 50% damage
   },
 };
@@ -394,12 +394,12 @@ function spawnEnemy(typeId, x, y) {
   const t = ENEMY_TYPES[typeId];
   const stage = game.stage;
   // Per-stage scaling — harder enemies as you progress
-  const stageHpMul = 1 + (stage - 1) * 0.15;
-  const stageSpeedMul = 1 + (stage - 1) * 0.10;
-  const stageDmgMul = 1 + (stage - 1) * 0.18;
+  const stageHpMul = 1 + (stage - 1) * 0.20;
+  const stageSpeedMul = 1 + (stage - 1) * 0.13;
+  const stageDmgMul = 1 + (stage - 1) * 0.25;
 
-  // Elite chance: 0% at stage 1, +8% at stage 2, +4% per stage after, capped
-  const eliteChance = stage >= 2 ? Math.min(0.30, 0.08 + (stage - 2) * 0.04) : 0;
+  // Elite chance: 0% at stage 1, +12% at stage 2, +5% per stage after, capped
+  const eliteChance = stage >= 2 ? Math.min(0.35, 0.12 + (stage - 2) * 0.05) : 0;
   const isElite = Math.random() < eliteChance;
 
   const eliteHpMul    = isElite ? 2.0  : 1;
@@ -479,10 +479,10 @@ function spawnWave() {
   const camRight = game.cameraX + W + 80;
   const dist = game.cameraX / 50;
   const pool = getSpawnPool();
-  const count = 1 + Math.floor(Math.random() * 2) + Math.min(2, Math.floor(dist / 700));
+  const count = 1 + Math.floor(Math.random() * 2) + Math.min(3, Math.floor(dist / 500));
   for (let i = 0; i < count; i++) {
     const id = pool[Math.floor(Math.random() * pool.length)];
-    spawnAt(id, camRight + rand(20 + i * 60, 280 + i * 80));
+    spawnAt(id, camRight + rand(20 + i * 50, 260 + i * 70));
   }
 }
 
@@ -685,7 +685,7 @@ function onBossDefeated(boss) {
   game.bossesDefeated += 1;
   game.stage += 1;
   // Next boss further away
-  game.bossNextAt = Math.floor(game.cameraX / 50) + 300;
+  game.bossNextAt = Math.floor(game.cameraX / 50) + 250;
   bossBar.classList.remove('visible');
   stageEl.textContent = 'Étage ' + game.stage;
 
@@ -709,7 +709,7 @@ function updateBoss(dt) {
   if (!b || b.dead) return;
   const p = game.player;
   const ai = b.ai;
-  ai.timer += dt;
+  // ai.timer is a countdown owned by each boss state — don't auto-increment here
   ai.attackTimer -= dt;
 
   if (b.bossId === 'liche') updateLiche(b, p, dt);
@@ -1073,7 +1073,7 @@ function update(dt) {
     game.spawnTimer -= dt;
     if (game.spawnTimer <= 0) {
       spawnWave();
-      game.spawnTimer = rand(1.6, 2.8) - Math.min(1.0, distance / 600);
+      game.spawnTimer = rand(1.2, 2.2) - Math.min(1.2, distance / 500);
     }
   }
 
@@ -2579,7 +2579,7 @@ function startGame() {
   game.stage = 1;
   game.bossActive = false;
   game.boss = null;
-  game.bossNextAt = 300;
+  game.bossNextAt = 250;
   game.bossesDefeated = 0;
   game.unlockedWeapons = new Set(['sword', 'bow', 'hammer']);
   game.upgrades = {
