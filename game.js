@@ -392,12 +392,34 @@ const BOSS_ORDER = ['liche', 'champion', 'dragon'];
 
 function spawnEnemy(typeId, x, y) {
   const t = ENEMY_TYPES[typeId];
+  const stage = game.stage;
+  // Per-stage scaling — harder enemies as you progress
+  const stageHpMul = 1 + (stage - 1) * 0.15;
+  const stageSpeedMul = 1 + (stage - 1) * 0.10;
+  const stageDmgMul = 1 + (stage - 1) * 0.18;
+
+  // Elite chance: 0% at stage 1, +8% at stage 2, +4% per stage after, capped
+  const eliteChance = stage >= 2 ? Math.min(0.30, 0.08 + (stage - 2) * 0.04) : 0;
+  const isElite = Math.random() < eliteChance;
+
+  const eliteHpMul    = isElite ? 2.0  : 1;
+  const eliteSpeedMul = isElite ? 1.25 : 1;
+  const eliteDmgMul   = isElite ? 1.5  : 1;
+  const eliteScale    = isElite ? 1.18 : 1;
+
+  const baseHp = Math.round(t.hp * stageHpMul * eliteHpMul);
+
   const e = {
     typeId, type: t,
     x, y,
-    w: t.w, h: t.h, r: t.r,
-    hp: t.hp, maxHp: t.hp,
-    speed: t.speed,
+    w: t.w * eliteScale,
+    h: t.h * eliteScale,
+    r: t.r * eliteScale,
+    hp: baseHp, maxHp: baseHp,
+    speed: t.speed * stageSpeedMul * eliteSpeedMul,
+    damageMul: stageDmgMul * eliteDmgMul,
+    elite: isElite,
+    scale: eliteScale,
     knockback: 0,
     knockbackDir: 0,
     flash: 0,
@@ -505,7 +527,8 @@ function damageEnemy(e, dmg, knockback, source) {
     game.kills += 1;
     killsEl.textContent = '☠ ' + game.kills;
     spawnDeathParticles(e);
-    const [lo, hi] = e.type.coinDrop;
+    let [lo, hi] = e.type.coinDrop;
+    if (e.elite) { lo = Math.round(lo * 1.8); hi = Math.round(hi * 1.8); }
     const n = Math.floor(rand(lo, hi + 1));
     for (let i = 0; i < n; i++) spawnCoin(e);
     if (e.isBoss) onBossDefeated(e);
@@ -693,6 +716,9 @@ function updateBoss(dt) {
   else if (b.bossId === 'champion') updateChampion(b, p, dt);
   else if (b.bossId === 'dragon') updateDragon(b, p, dt);
 
+  // Keep boss inside the arena (prevents charge from carrying him offscreen left)
+  if (b.x < game.cameraX - 40) b.x = game.cameraX - 40;
+
   // Update boss HP bar
   bossHpEl.style.width = clamp((b.hp / b.maxHp) * 100, 0, 100) + '%';
 }
@@ -877,7 +903,7 @@ function basicContact(e, p) {
   const ddx = p.x - e.x, ddy = p.y - e.y;
   if (e.contactTimer > 0) e.contactTimer -= 1/60;
   if (ddx*ddx + ddy*ddy < (e.r + 18) * (e.r + 18) && e.contactTimer <= 0) {
-    damagePlayer(e.type.damage);
+    damagePlayer(e.type.damage * (e.damageMul || 1));
     e.contactTimer = e.type.contactCooldown;
   }
 }
@@ -1000,15 +1026,22 @@ function update(dt) {
   if (!game.bossActive) {
     const baseScroll = 40 + Math.min(40, (game.stage - 1) * 6);
     game.cameraX += baseScroll * dt;
+    const targetCam = p.x - W * 0.35;
+    game.cameraX = Math.max(game.cameraX, targetCam);
   }
-  const targetCam = p.x - W * 0.35;
-  game.cameraX = Math.max(game.cameraX, targetCam);
+  // During boss fight, camera is locked at game.bossArenaX (set on spawn)
+
   const distance = Math.floor(game.cameraX / 50);
   distEl.textContent = distance + ' m';
 
   // Player can't fall behind the camera (gets pushed forward)
   const leftEdge = game.cameraX + 30;
   if (p.x < leftEdge) p.x = leftEdge;
+  // During boss fight, also constrain right edge (camera is locked)
+  if (game.bossActive) {
+    const rightEdge = game.cameraX + W - 30;
+    if (p.x > rightEdge) p.x = rightEdge;
+  }
 
   if (input.attack) attackPlayer();
 
@@ -1082,7 +1115,7 @@ function update(dt) {
             x: e.x, y: e.y - e.h * 0.5,
             vx: Math.cos(ang) * sp2,
             vy: Math.sin(ang) * sp2,
-            damage: 8,
+            damage: 8 * (e.damageMul || 1),
             life: 1.4,
             friendly: false,
             spin: rand(0, TAU),
@@ -1100,13 +1133,13 @@ function update(dt) {
 
     const ddx = p.x - e.x, ddy = p.y - e.y;
     if (ddx*ddx + ddy*ddy < (e.r + 18) * (e.r + 18) && e.contactTimer <= 0) {
-      damagePlayer(e.type.damage);
+      damagePlayer(e.type.damage * (e.damageMul || 1));
       e.contactTimer = e.type.contactCooldown;
     }
   }
   game.enemies = game.enemies.filter(e =>
     !(e.dead && e.deathTimer <= 0) &&
-    e.x > game.cameraX - 200
+    (e.isBoss || e.x > game.cameraX - 200)
   );
 
   // Projectiles
@@ -1656,6 +1689,19 @@ function drawEnemy(e) {
   const dying = e.dead;
   const alpha = dying ? Math.max(0, e.deathTimer / (e.isBoss ? 1.2 : 0.4)) : (e.type.ghostly ? 0.75 : 1);
 
+  // Elite aura under feet (drawn before everything else)
+  if (e.elite && !dying) {
+    const pulse = 0.6 + Math.sin(game.t * 4 + e.x) * 0.25;
+    const auraGrad = ctx.createRadialGradient(x, y, 4, x, y, e.w * 1.5);
+    auraGrad.addColorStop(0, `rgba(255, 60, 60, ${0.5 * pulse})`);
+    auraGrad.addColorStop(0.6, `rgba(255, 40, 40, ${0.2 * pulse})`);
+    auraGrad.addColorStop(1, 'rgba(255, 40, 40, 0)');
+    ctx.fillStyle = auraGrad;
+    ctx.beginPath();
+    ctx.ellipse(x, y, e.w * 1.5, 16, 0, 0, TAU);
+    ctx.fill();
+  }
+
   ctx.save();
   ctx.globalAlpha = alpha;
 
@@ -1686,10 +1732,28 @@ function drawEnemy(e) {
     const by = y - e.h - 14;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
     ctx.fillRect(bx, by, bw, 4);
-    ctx.fillStyle = '#cc3030';
+    ctx.fillStyle = e.elite ? '#ff4040' : '#cc3030';
     ctx.fillRect(bx, by, bw * (e.hp / e.maxHp), 4);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.strokeStyle = e.elite ? 'rgba(255, 200, 100, 0.5)' : 'rgba(255, 255, 255, 0.15)';
     ctx.strokeRect(bx, by, bw, 4);
+  }
+
+  // Elite crown indicator
+  if (!dying && e.elite && !e.isBoss) {
+    const cy = y - e.h - 22;
+    ctx.fillStyle = '#ff4040';
+    for (let i = -1; i <= 1; i++) {
+      const cx = x + i * 7;
+      ctx.beginPath();
+      ctx.moveTo(cx - 3, cy);
+      ctx.lineTo(cx, cy - 7);
+      ctx.lineTo(cx + 3, cy);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // base bar
+    ctx.fillStyle = '#aa2020';
+    ctx.fillRect(x - 12, cy, 24, 2);
   }
 }
 
