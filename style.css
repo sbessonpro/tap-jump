@@ -1,0 +1,105 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1a1a2e;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  touch-action: manipulation;
+}
+
+#game-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 60%, #0f3460 100%);
+}
+
+#hud {
+  position: absolute;
+  top: 20px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 24px;
+  pointer-events: none;
+  color: #fff;
+  font-weight: 700;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+
+#score {
+  font-size: 32px;
+}
+
+#best {
+  font-size: 14px;
+  opacity: 0.8;
+  align-self: center;
+}
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: rgba(15, 25, 45, 0.85);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  text-align: center;
+  padding: 24px;
+}
+
+#overlay.visible {
+  display: flex;
+}
+
+#overlay h1 {
+  font-size: 48px;
+  letter-spacing: 2px;
+  background: linear-gradient(135deg, #ffd86b, #ff6b6b);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+#overlay p {
+  font-size: 16px;
+  opacity: 0.85;
+}
+
+#start-btn {
+  margin-top: 12px;
+  padding: 14px 36px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a1a2e;
+  background: linear-gradient(135deg, #ffd86b, #ff9f43);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(255, 159, 67, 0.5);
+  transition: transform 0.1s ease;
+}
+
+#start-btn:active {
+  transform: scale(0.96);
+}
