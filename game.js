@@ -556,17 +556,19 @@ function render(dt) {
   drawBackground(dt);
   drawGround();
 
-  // Sort entities by Y for pseudo-depth
-  const all = [];
-  for (const e of game.enemies) all.push({ y: e.y, draw: () => drawEnemy(e) });
-  all.push({ y: game.player.y, draw: () => drawPlayer() });
-  all.sort((a, b) => a.y - b.y);
-  for (const item of all) item.draw();
+  if (game.player) {
+    // Sort entities by Y for pseudo-depth
+    const all = [];
+    for (const e of game.enemies) all.push({ y: e.y, draw: () => drawEnemy(e) });
+    all.push({ y: game.player.y, draw: () => drawPlayer() });
+    all.sort((a, b) => a.y - b.y);
+    for (const item of all) item.draw();
 
-  drawProjectiles();
-  drawParticles();
-  drawDamageNums();
-  drawTorchOverlay();
+    drawProjectiles();
+    drawParticles();
+    drawDamageNums();
+    drawTorchOverlay();
+  }
 
   ctx.restore();
 }
