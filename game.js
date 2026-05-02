@@ -194,7 +194,7 @@ const game = {
   stage: 1,
   bossActive: false,
   boss: null,
-  bossNextAt: 500,           // distance in meters for next boss spawn
+  bossNextAt: 300,           // distance in meters for next boss spawn
   bossesDefeated: 0,
   unlockedWeapons: null,     // Set, set in startGame
   upgrades: {
@@ -662,7 +662,7 @@ function onBossDefeated(boss) {
   game.bossesDefeated += 1;
   game.stage += 1;
   // Next boss further away
-  game.bossNextAt = Math.floor(game.cameraX / 50) + 500;
+  game.bossNextAt = Math.floor(game.cameraX / 50) + 300;
   bossBar.classList.remove('visible');
   stageEl.textContent = 'Étage ' + game.stage;
 
@@ -895,6 +895,9 @@ const SHOP_ITEMS = [
   { id: 'sword_up',    name: 'Épée affûtée',     desc: 'Épée +60% dégâts',        price: 130, icon: '⚔️',  once: true, apply: () => { game.upgrades.weaponBonus.sword = 1.6; } },
   { id: 'bow_up',      name: 'Arc enchanté',     desc: 'Arc +60% dégâts',         price: 130, icon: '🏹',  once: true, apply: () => { game.upgrades.weaponBonus.bow = 1.6; } },
   { id: 'hammer_up',   name: 'Marteau de guerre', desc: 'Marteau +60% dégâts',    price: 160, icon: '🔨',  once: true, apply: () => { game.upgrades.weaponBonus.hammer = 1.6; } },
+  { id: 'dagger_up',   name: 'Dague maudite',     desc: 'Dague +60% dégâts',      price: 110, icon: '🗡',  once: true, requires: 'dagger',     apply: () => { game.upgrades.weaponBonus.dagger = 1.6; } },
+  { id: 'spear_up',    name: 'Lance runique',     desc: 'Lance +60% dégâts',      price: 150, icon: '🔱',  once: true, requires: 'spear',      apply: () => { game.upgrades.weaponBonus.spear = 1.6; } },
+  { id: 'magic_up',    name: 'Lame des arcanes',  desc: 'Épée mystique +60%',     price: 250, icon: '✨',  once: true, requires: 'magicSword', apply: () => { game.upgrades.weaponBonus.magicSword = 1.6; } },
 ];
 
 function toggleShop() {
@@ -922,6 +925,7 @@ function renderShop() {
   shopList.innerHTML = '';
   for (const item of SHOP_ITEMS) {
     if (item.once && game.upgrades.purchased.has(item.id)) continue;
+    if (item.requires && !game.unlockedWeapons.has(item.requires)) continue;
     const card = document.createElement('div');
     card.className = 'shop-item';
     if (game.coins < item.price) card.classList.add('disabled');
@@ -992,11 +996,17 @@ function update(dt) {
   p.moving = Math.abs(mx) > 0.05 || Math.abs(my) > 0.05;
   if (p.moving) p.walkPhase += dt * 13;
 
+  // Auto-scroll: world advances even when player stops, except during boss fights
+  if (!game.bossActive) {
+    const baseScroll = 40 + Math.min(40, (game.stage - 1) * 6);
+    game.cameraX += baseScroll * dt;
+  }
   const targetCam = p.x - W * 0.35;
   game.cameraX = Math.max(game.cameraX, targetCam);
   const distance = Math.floor(game.cameraX / 50);
   distEl.textContent = distance + ' m';
 
+  // Player can't fall behind the camera (gets pushed forward)
   const leftEdge = game.cameraX + 30;
   if (p.x < leftEdge) p.x = leftEdge;
 
@@ -2505,7 +2515,7 @@ function startGame() {
   game.stage = 1;
   game.bossActive = false;
   game.boss = null;
-  game.bossNextAt = 500;
+  game.bossNextAt = 300;
   game.bossesDefeated = 0;
   game.unlockedWeapons = new Set(['sword', 'bow', 'hammer']);
   game.upgrades = {
