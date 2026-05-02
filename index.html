@@ -18,7 +18,9 @@
         <div id="distance">0 m</div>
       </div>
       <div class="hud-right">
-        <div id="kills">0 kills</div>
+        <div id="coins">⛁ 0</div>
+        <div id="kills">☠ 0</div>
+        <button id="shop-btn" class="hud-btn">🏪 Boutique</button>
       </div>
     </div>
 
@@ -36,6 +38,18 @@
       <button id="attack-btn" class="action-btn primary">ATK</button>
     </div>
 
+    <!-- Shop modal -->
+    <div id="shop-modal">
+      <div class="shop-panel">
+        <div class="shop-header">
+          <h2>Boutique du donjon</h2>
+          <div id="shop-coins">⛁ 0</div>
+          <button id="shop-close">✕</button>
+        </div>
+        <div id="shop-list"></div>
+      </div>
+    </div>
+
     <!-- Overlay screens -->
     <div id="overlay" class="visible">
       <h1>Shadow Crawl</h1>
@@ -44,6 +58,7 @@
         <div><span class="kbd">Joystick</span> déplacer</div>
         <div><span class="kbd">ATK</span> attaquer</div>
         <div><span class="kbd">⚔/🏹/🔨</span> changer d'arme</div>
+        <div><span class="kbd">Boutique</span> acheter des bonus</div>
       </div>
       <button id="start-btn">Entrer dans le donjon</button>
     </div>
