@@ -464,6 +464,19 @@ html, body {
 
 .shop-info { flex: 1; }
 .shop-name { font-size: 14px; font-weight: 700; letter-spacing: 1px; color: #e8d8b0; }
+
+.shop-stacks {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  background: rgba(180, 100, 60, 0.3);
+  border: 1px solid rgba(200, 140, 80, 0.4);
+  border-radius: 3px;
+  color: #ffd86b;
+}
 .shop-desc { font-size: 12px; color: #b8b8c8; margin-top: 2px; }
 
 .shop-price {

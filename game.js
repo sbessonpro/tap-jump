@@ -306,49 +306,49 @@ function spawnSwingParticles(p, w) {
 const ENEMY_TYPES = {
   skeleton: {
     w: 36, h: 58, r: 24,
-    hp: 50, speed: 100, damage: 12,
+    hp: 65, speed: 100, damage: 14,
     color: '#d8d0bc', accent: '#5a3a3a',
-    coinDrop: [3, 6],
+    coinDrop: [4, 7],
     contactCooldown: 0.8,
   },
   bat: {
     w: 32, h: 26, r: 20,
-    hp: 22, speed: 180, damage: 8,
+    hp: 30, speed: 185, damage: 10,
     color: '#3a2a4a', accent: '#7a3a8a',
-    coinDrop: [1, 3],
+    coinDrop: [2, 4],
     contactCooldown: 0.55,
     flying: true,
   },
   brute: {
     w: 56, h: 78, r: 34,
-    hp: 150, speed: 75, damage: 26,
+    hp: 220, speed: 75, damage: 36,
     color: '#5a2a2a', accent: '#3a1010',
-    coinDrop: [10, 18],
+    coinDrop: [14, 22],
     contactCooldown: 1.0,
   },
   goblin: {
     w: 30, h: 46, r: 19,
-    hp: 38, speed: 140, damage: 10,
+    hp: 50, speed: 140, damage: 12,
     color: '#3a6a3a', accent: '#1a3a1a',
-    coinDrop: [4, 8],
+    coinDrop: [5, 10],
     contactCooldown: 0.65,
     throwCooldown: [1.8, 3.4],
     preferredDist: 150,
   },
   wraith: {
     w: 38, h: 60, r: 24,
-    hp: 50, speed: 125, damage: 16,
+    hp: 70, speed: 130, damage: 22,
     color: '#403060', accent: '#a060c0',
-    coinDrop: [6, 12],
+    coinDrop: [8, 14],
     contactCooldown: 0.85,
     flying: true,
     ghostly: true,
   },
   armored: {
     w: 46, h: 68, r: 28,
-    hp: 230, speed: 65, damage: 22,
+    hp: 340, speed: 65, damage: 30,
     color: '#5a5a6a', accent: '#2a2a3a',
-    coinDrop: [14, 24],
+    coinDrop: [18, 30],
     contactCooldown: 1.1,
     armor: 0.5,             // arrows do 50% damage
   },
@@ -393,10 +393,10 @@ const BOSS_ORDER = ['liche', 'champion', 'dragon'];
 function spawnEnemy(typeId, x, y) {
   const t = ENEMY_TYPES[typeId];
   const stage = game.stage;
-  // Per-stage scaling — harder enemies as you progress
-  const stageHpMul = 1 + (stage - 1) * 0.20;
-  const stageSpeedMul = 1 + (stage - 1) * 0.13;
-  const stageDmgMul = 1 + (stage - 1) * 0.25;
+  // Per-stage scaling — harder enemies as you progress (with caps)
+  const stageHpMul    = 1 + Math.min(2.0, (stage - 1) * 0.22);
+  const stageSpeedMul = 1 + Math.min(0.6, (stage - 1) * 0.10);
+  const stageDmgMul   = 1 + Math.min(1.8, (stage - 1) * 0.22);
 
   // Elite chance: 0% at stage 1, +12% at stage 2, +5% per stage after, capped
   const eliteChance = stage >= 2 ? Math.min(0.35, 0.12 + (stage - 2) * 0.05) : 0;
@@ -474,15 +474,20 @@ function getSpawnPool() {
   return pool;
 }
 
+const MAX_ENEMIES_ON_SCREEN = 5;
+
 function spawnWave() {
   if (game.bossActive) return;
+  const aliveCount = game.enemies.filter(e => !e.dead && !e.isBoss).length;
+  if (aliveCount >= MAX_ENEMIES_ON_SCREEN) return;
   const camRight = game.cameraX + W + 80;
   const dist = game.cameraX / 50;
   const pool = getSpawnPool();
-  const count = 1 + Math.floor(Math.random() * 2) + Math.min(3, Math.floor(dist / 500));
+  const want = 1 + Math.floor(Math.random() * 2) + Math.min(2, Math.floor(dist / 800));
+  const count = Math.min(MAX_ENEMIES_ON_SCREEN - aliveCount, want);
   for (let i = 0; i < count; i++) {
     const id = pool[Math.floor(Math.random() * pool.length)];
-    spawnAt(id, camRight + rand(20 + i * 50, 260 + i * 70));
+    spawnAt(id, camRight + rand(20 + i * 60, 260 + i * 80));
   }
 }
 
@@ -909,22 +914,37 @@ function basicContact(e, p) {
 }
 
 // ============ Shop ============
+// basePrice : initial cost; priceMul : multiplier applied per existing stack;
+// maxStacks : cap on how many times a stackable upgrade can be bought.
 const SHOP_ITEMS = [
-  { id: 'heal_small',  name: 'Potion mineure',   desc: '+50 PV',                  price: 20,  icon: '❤️', apply: () => { game.player.hp = Math.min(game.player.maxHp, game.player.hp + 50); refreshHpUI(); } },
-  { id: 'heal_full',   name: 'Potion majeure',   desc: 'Soin total',              price: 50,  icon: '🧪', apply: () => { game.player.hp = game.player.maxHp; refreshHpUI(); } },
-  { id: 'maxhp',       name: 'Vitalité',         desc: '+25 PV max',              price: 80,  icon: '💪', apply: () => { game.player.maxHp += 25; game.player.hp += 25; refreshHpUI(); } },
-  { id: 'damage',      name: 'Force',            desc: '+20% dégâts',             price: 100, icon: '⚡', apply: () => { game.upgrades.damageMul *= 1.2; } },
-  { id: 'speed',       name: 'Agilité',          desc: '+15% vitesse',            price: 60,  icon: '👟', apply: () => { game.upgrades.speedMul *= 1.15; } },
-  { id: 'unlock_dagger',  name: 'Dague',            desc: 'Mêlée très rapide',                price: 90,  icon: '🗡', once: true, apply: () => { game.unlockedWeapons.add('dagger'); } },
-  { id: 'unlock_spear',   name: 'Lance',            desc: 'Mêlée longue portée',              price: 130, icon: '🔱', once: true, apply: () => { game.unlockedWeapons.add('spear'); } },
-  { id: 'unlock_magic',   name: 'Épée mystique',    desc: 'Lance une onde de slash',          price: 220, icon: '✨', once: true, apply: () => { game.unlockedWeapons.add('magicSword'); } },
-  { id: 'sword_up',    name: 'Épée affûtée',     desc: 'Épée +60% dégâts',        price: 130, icon: '⚔️',  once: true, apply: () => { game.upgrades.weaponBonus.sword = 1.6; } },
-  { id: 'bow_up',      name: 'Arc enchanté',     desc: 'Arc +60% dégâts',         price: 130, icon: '🏹',  once: true, apply: () => { game.upgrades.weaponBonus.bow = 1.6; } },
-  { id: 'hammer_up',   name: 'Marteau de guerre', desc: 'Marteau +60% dégâts',    price: 160, icon: '🔨',  once: true, apply: () => { game.upgrades.weaponBonus.hammer = 1.6; } },
-  { id: 'dagger_up',   name: 'Dague maudite',     desc: 'Dague +60% dégâts',      price: 110, icon: '🗡',  once: true, requires: 'dagger',     apply: () => { game.upgrades.weaponBonus.dagger = 1.6; } },
-  { id: 'spear_up',    name: 'Lance runique',     desc: 'Lance +60% dégâts',      price: 150, icon: '🔱',  once: true, requires: 'spear',      apply: () => { game.upgrades.weaponBonus.spear = 1.6; } },
-  { id: 'magic_up',    name: 'Lame des arcanes',  desc: 'Épée mystique +60%',     price: 250, icon: '✨',  once: true, requires: 'magicSword', apply: () => { game.upgrades.weaponBonus.magicSword = 1.6; } },
+  { id: 'heal_small',  name: 'Potion mineure',   desc: '+50 PV',                  basePrice: 25,  priceMul: 1.0, icon: '❤️', apply: () => { game.player.hp = Math.min(game.player.maxHp, game.player.hp + 50); refreshHpUI(); } },
+  { id: 'heal_full',   name: 'Potion majeure',   desc: 'Soin total',              basePrice: 60,  priceMul: 1.0, icon: '🧪', apply: () => { game.player.hp = game.player.maxHp; refreshHpUI(); } },
+  { id: 'maxhp',       name: 'Vitalité',         desc: '+25 PV max',              basePrice: 90,  priceMul: 1.6, maxStacks: 5, icon: '💪', apply: () => { game.player.maxHp += 25; game.player.hp += 25; refreshHpUI(); } },
+  { id: 'damage',      name: 'Force',            desc: '+20% dégâts',             basePrice: 110, priceMul: 1.7, maxStacks: 5, icon: '⚡', apply: () => { game.upgrades.damageMul *= 1.2; } },
+  { id: 'speed',       name: 'Agilité',          desc: '+12% vitesse',            basePrice: 80,  priceMul: 2.0, maxStacks: 3, icon: '👟', apply: () => { game.upgrades.speedMul *= 1.12; } },
+  { id: 'unlock_dagger',  name: 'Dague',            desc: 'Mêlée très rapide',                basePrice: 90,  priceMul: 1, icon: '🗡', once: true, apply: () => { game.unlockedWeapons.add('dagger'); } },
+  { id: 'unlock_spear',   name: 'Lance',            desc: 'Mêlée longue portée',              basePrice: 140, priceMul: 1, icon: '🔱', once: true, apply: () => { game.unlockedWeapons.add('spear'); } },
+  { id: 'unlock_magic',   name: 'Épée mystique',    desc: 'Lance une onde de slash',          basePrice: 240, priceMul: 1, icon: '✨', once: true, apply: () => { game.unlockedWeapons.add('magicSword'); } },
+  { id: 'sword_up',    name: 'Épée affûtée',     desc: 'Épée +60% dégâts',        basePrice: 140, priceMul: 1, icon: '⚔️',  once: true, apply: () => { game.upgrades.weaponBonus.sword = 1.6; } },
+  { id: 'bow_up',      name: 'Arc enchanté',     desc: 'Arc +60% dégâts',         basePrice: 140, priceMul: 1, icon: '🏹',  once: true, apply: () => { game.upgrades.weaponBonus.bow = 1.6; } },
+  { id: 'hammer_up',   name: 'Marteau de guerre', desc: 'Marteau +60% dégâts',    basePrice: 180, priceMul: 1, icon: '🔨',  once: true, apply: () => { game.upgrades.weaponBonus.hammer = 1.6; } },
+  { id: 'dagger_up',   name: 'Dague maudite',     desc: 'Dague +60% dégâts',      basePrice: 120, priceMul: 1, icon: '🗡',  once: true, requires: 'dagger',     apply: () => { game.upgrades.weaponBonus.dagger = 1.6; } },
+  { id: 'spear_up',    name: 'Lance runique',     desc: 'Lance +60% dégâts',      basePrice: 160, priceMul: 1, icon: '🔱',  once: true, requires: 'spear',      apply: () => { game.upgrades.weaponBonus.spear = 1.6; } },
+  { id: 'magic_up',    name: 'Lame des arcanes',  desc: 'Épée mystique +60%',     basePrice: 280, priceMul: 1, icon: '✨',  once: true, requires: 'magicSword', apply: () => { game.upgrades.weaponBonus.magicSword = 1.6; } },
 ];
+
+function getStacks(id)     { return game.upgrades.stacks[id] || 0; }
+function getCurrentPrice(item) {
+  if (item.once) return item.basePrice;
+  const stacks = getStacks(item.id);
+  return Math.floor(item.basePrice * Math.pow(item.priceMul || 1, stacks));
+}
+function isItemAvailable(item) {
+  if (item.once && game.upgrades.purchased.has(item.id)) return false;
+  if (item.requires && !game.unlockedWeapons.has(item.requires)) return false;
+  if (item.maxStacks && getStacks(item.id) >= item.maxStacks) return false;
+  return true;
+}
 
 function toggleShop() {
   if (!game.running) return;
@@ -950,18 +970,22 @@ function closeShop() {
 function renderShop() {
   shopList.innerHTML = '';
   for (const item of SHOP_ITEMS) {
-    if (item.once && game.upgrades.purchased.has(item.id)) continue;
-    if (item.requires && !game.unlockedWeapons.has(item.requires)) continue;
+    if (!isItemAvailable(item)) continue;
+    const price = getCurrentPrice(item);
     const card = document.createElement('div');
     card.className = 'shop-item';
-    if (game.coins < item.price) card.classList.add('disabled');
+    if (game.coins < price) card.classList.add('disabled');
+    const stacks = getStacks(item.id);
+    const stackBadge = item.maxStacks
+      ? `<span class="shop-stacks">${stacks}/${item.maxStacks}</span>`
+      : '';
     card.innerHTML = `
       <div class="shop-icon">${item.icon}</div>
       <div class="shop-info">
-        <div class="shop-name">${item.name}</div>
+        <div class="shop-name">${item.name} ${stackBadge}</div>
         <div class="shop-desc">${item.desc}</div>
       </div>
-      <div class="shop-price">⛁ ${item.price}</div>
+      <div class="shop-price">⛁ ${price}</div>
     `;
     card.addEventListener('click', () => buyItem(item));
     shopList.appendChild(card);
@@ -970,9 +994,15 @@ function renderShop() {
 }
 
 function buyItem(item) {
-  if (game.coins < item.price) return;
-  game.coins -= item.price;
-  if (item.once) game.upgrades.purchased.add(item.id);
+  if (!isItemAvailable(item)) return;
+  const price = getCurrentPrice(item);
+  if (game.coins < price) return;
+  game.coins -= price;
+  if (item.once) {
+    game.upgrades.purchased.add(item.id);
+  } else {
+    game.upgrades.stacks[item.id] = getStacks(item.id) + 1;
+  }
   item.apply();
   coinsEl.textContent = '⛁ ' + game.coins;
   renderShop();
@@ -1073,7 +1103,7 @@ function update(dt) {
     game.spawnTimer -= dt;
     if (game.spawnTimer <= 0) {
       spawnWave();
-      game.spawnTimer = rand(1.2, 2.2) - Math.min(1.2, distance / 500);
+      game.spawnTimer = rand(1.6, 2.6) - Math.min(0.7, distance / 700);
     }
   }
 
@@ -1688,6 +1718,24 @@ function drawEnemy(e) {
   const bob = Math.sin(e.bobble) * (e.type.flying ? 7 : 2);
   const dying = e.dead;
   const alpha = dying ? Math.max(0, e.deathTimer / (e.isBoss ? 1.2 : 0.4)) : (e.type.ghostly ? 0.75 : 1);
+
+  // Menace aura on dangerous mob types (drawn first, behind everything)
+  const menaceAuras = {
+    brute:   { r: 140, g: 20, b: 20, a: 0.30 },
+    armored: { r: 30,  g: 30, b: 90, a: 0.30 },
+    wraith:  { r: 130, g: 60, b: 200, a: 0.40 },
+  };
+  if (!dying && menaceAuras[e.typeId]) {
+    const c = menaceAuras[e.typeId];
+    const pulse = 0.7 + Math.sin(game.t * 2 + e.x * 0.01) * 0.3;
+    const grad = ctx.createRadialGradient(x, y - e.h * 0.4, 4, x, y - e.h * 0.4, e.w * 1.6);
+    grad.addColorStop(0, `rgba(${c.r}, ${c.g}, ${c.b}, ${c.a * pulse})`);
+    grad.addColorStop(1, `rgba(${c.r}, ${c.g}, ${c.b}, 0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(x, y - e.h * 0.4, e.w * 1.5, e.h * 0.7, 0, 0, TAU);
+    ctx.fill();
+  }
 
   // Elite aura under feet (drawn before everything else)
   if (e.elite && !dying) {
@@ -2587,6 +2635,7 @@ function startGame() {
     speedMul: 1,
     weaponBonus: { sword: 1, bow: 1, hammer: 1, dagger: 1, spear: 1, magicSword: 1 },
     purchased: new Set(),
+    stacks: {},
   };
   killsEl.textContent = '☠ 0';
   coinsEl.textContent = '⛁ 0';
