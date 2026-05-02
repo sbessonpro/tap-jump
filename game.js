@@ -306,51 +306,57 @@ function spawnSwingParticles(p, w) {
 const ENEMY_TYPES = {
   skeleton: {
     w: 36, h: 58, r: 24,
-    hp: 65, speed: 100, damage: 14,
+    hp: 65, speed: 105, damage: 14,
     color: '#d8d0bc', accent: '#5a3a3a',
     coinDrop: [4, 7],
     contactCooldown: 0.8,
+    skill: { name: 'lunge', cooldown: [3.5, 5.5], range: 110, windup: 0.35, dashSpeed: 360, dashTime: 0.25 },
   },
   bat: {
     w: 32, h: 26, r: 20,
-    hp: 30, speed: 185, damage: 10,
+    hp: 30, speed: 195, damage: 10,
     color: '#3a2a4a', accent: '#7a3a8a',
     coinDrop: [2, 4],
     contactCooldown: 0.55,
     flying: true,
+    skill: { name: 'dive', cooldown: [3.5, 5.5], range: 280, diveSpeed: 380, diveTime: 0.55 },
   },
   brute: {
     w: 56, h: 78, r: 34,
-    hp: 220, speed: 75, damage: 36,
+    hp: 220, speed: 80, damage: 36,
     color: '#5a2a2a', accent: '#3a1010',
     coinDrop: [14, 22],
     contactCooldown: 1.0,
+    skill: { name: 'slam', cooldown: [4.5, 6.5], range: 130, windup: 0.7, aoeRadius: 140, slamDamage: 42 },
   },
   goblin: {
     w: 30, h: 46, r: 19,
-    hp: 50, speed: 140, damage: 12,
+    hp: 50, speed: 150, damage: 12,
     color: '#3a6a3a', accent: '#1a3a1a',
     coinDrop: [5, 10],
     contactCooldown: 0.65,
     throwCooldown: [1.8, 3.4],
     preferredDist: 150,
+    skill: { name: 'roll', cooldown: [2.5, 4.5], rollTime: 0.4, rollSpeed: 280, iframes: 0.4 },
   },
   wraith: {
     w: 38, h: 60, r: 24,
-    hp: 70, speed: 130, damage: 22,
+    hp: 70, speed: 140, damage: 22,
     color: '#403060', accent: '#a060c0',
     coinDrop: [8, 14],
     contactCooldown: 0.85,
     flying: true,
     ghostly: true,
+    skill: { name: 'blink', cooldown: [4, 6] },
   },
   armored: {
     w: 46, h: 68, r: 28,
-    hp: 340, speed: 65, damage: 30,
+    hp: 340, speed: 70, damage: 30,
     color: '#5a5a6a', accent: '#2a2a3a',
     coinDrop: [18, 30],
     contactCooldown: 1.1,
-    armor: 0.5,             // arrows do 50% damage
+    armor: 0.5,
+    skill: { name: 'shieldBash', cooldown: [4.5, 6.5], range: 150, windup: 0.45, dashSpeed: 400, dashTime: 0.3, bashDamage: 38 },
   },
 };
 
@@ -432,6 +438,12 @@ function spawnEnemy(typeId, x, y) {
   if (t.throwCooldown) {
     e.throwTimer = rand(t.throwCooldown[0], t.throwCooldown[1]);
   }
+  if (t.skill) {
+    e.skillState = 'idle';
+    e.skillStateLeft = 0;
+    e.skillNextAt = rand(t.skill.cooldown[0], t.skill.cooldown[1]) * 0.6;
+    e.invuln = 0;
+  }
   return e;
 }
 
@@ -500,6 +512,17 @@ function spawnAt(id, x) {
 }
 
 function damageEnemy(e, dmg, knockback, source) {
+  // i-frames (rolls, blinks) — full miss
+  if (e.invuln && e.invuln > 0) {
+    game.damageNums.push({
+      x: e.x, y: e.y - e.h * 0.65,
+      vy: -70,
+      text: 'esquive',
+      life: 0.7, maxLife: 0.7,
+      color: '#aaffaa',
+    });
+    return;
+  }
   // Armor reduces ranged damage
   if (e.type.armor && source === 'ranged') {
     dmg = dmg * e.type.armor;
@@ -913,6 +936,296 @@ function basicContact(e, p) {
   }
 }
 
+// ============ Enemy skills ============
+// Each handler returns true if the skill is currently overriding default movement.
+function updateEnemySkill(e, p, dt) {
+  if (!e.type.skill) return false;
+  if (e.invuln > 0) e.invuln -= dt;
+  switch (e.type.skill.name) {
+    case 'lunge':      return skillLunge(e, p, dt);
+    case 'dive':       return skillDive(e, p, dt);
+    case 'slam':       return skillSlam(e, p, dt);
+    case 'roll':       return skillRoll(e, p, dt);
+    case 'blink':      return skillBlink(e, p, dt);
+    case 'shieldBash': return skillShieldBash(e, p, dt);
+  }
+  return false;
+}
+
+function rollCooldown(e) {
+  return rand(e.type.skill.cooldown[0], e.type.skill.cooldown[1]);
+}
+
+function skillLunge(e, p, dt) {
+  const s = e.type.skill;
+  if (e.skillState === 'idle') {
+    e.skillNextAt -= dt;
+    if (e.skillNextAt <= 0) {
+      const d = Math.hypot(p.x - e.x, p.y - e.y);
+      if (d < s.range && d > 25) {
+        e.skillState = 'windup';
+        e.skillStateLeft = s.windup;
+      } else {
+        e.skillNextAt = 0.35;
+      }
+    }
+    return false;
+  }
+  if (e.skillState === 'windup') {
+    e.skillStateLeft -= dt;
+    if (e.skillStateLeft <= 0) {
+      e.skillState = 'active';
+      e.skillStateLeft = s.dashTime;
+      const dx = p.x - e.x, dy = p.y - e.y;
+      const d = Math.hypot(dx, dy) || 1;
+      e.lungeVx = (dx / d) * s.dashSpeed;
+      e.lungeVy = (dy / d) * s.dashSpeed * 0.5;
+    }
+    return true;
+  }
+  if (e.skillState === 'active') {
+    e.skillStateLeft -= dt;
+    e.x += e.lungeVx * dt;
+    e.y += e.lungeVy * dt;
+    e.y = clamp(e.y, bandTop, bandBot);
+    if (Math.random() < 0.6) {
+      game.particles.push({
+        x: e.x, y: e.y - e.h * 0.5,
+        vx: rand(-30, 30), vy: rand(-30, 30),
+        life: 0.3, maxLife: 0.3,
+        color: '#ff5050', size: 2,
+      });
+    }
+    if (e.skillStateLeft <= 0) {
+      e.skillState = 'idle';
+      e.skillNextAt = rollCooldown(e);
+    }
+    return true;
+  }
+  return false;
+}
+
+function skillDive(e, p, dt) {
+  const s = e.type.skill;
+  if (e.skillState === 'idle') {
+    e.skillNextAt -= dt;
+    if (e.skillNextAt <= 0) {
+      const d = Math.hypot(p.x - e.x, p.y - e.y);
+      if (d < s.range) {
+        e.skillState = 'active';
+        e.skillStateLeft = s.diveTime;
+        e.diveTarget = { x: p.x, y: p.y - 5 };
+      } else {
+        e.skillNextAt = 0.4;
+      }
+    }
+    return false;
+  }
+  if (e.skillState === 'active') {
+    e.skillStateLeft -= dt;
+    const dx = e.diveTarget.x - e.x, dy = e.diveTarget.y - e.y;
+    const d = Math.hypot(dx, dy) || 1;
+    e.x += (dx / d) * s.diveSpeed * dt;
+    e.y += (dy / d) * s.diveSpeed * dt;
+    if (Math.random() < 0.6) {
+      game.particles.push({
+        x: e.x, y: e.y,
+        vx: rand(-30, 30), vy: rand(-20, 20),
+        life: 0.3, maxLife: 0.3,
+        color: '#7a3a8a', size: 2,
+      });
+    }
+    if (e.skillStateLeft <= 0 || (Math.abs(dx) < 18 && Math.abs(dy) < 18)) {
+      e.skillState = 'idle';
+      e.skillNextAt = rollCooldown(e);
+    }
+    return true;
+  }
+  return false;
+}
+
+function skillSlam(e, p, dt) {
+  const s = e.type.skill;
+  if (e.skillState === 'idle') {
+    e.skillNextAt -= dt;
+    if (e.skillNextAt <= 0) {
+      const d = Math.hypot(p.x - e.x, p.y - e.y);
+      if (d < s.range) {
+        e.skillState = 'windup';
+        e.skillStateLeft = s.windup;
+      } else {
+        e.skillNextAt = 0.35;
+      }
+    }
+    return false;
+  }
+  if (e.skillState === 'windup') {
+    e.skillStateLeft -= dt;
+    if (Math.random() < 0.5) {
+      game.particles.push({
+        x: e.x + rand(-15, 15), y: e.y - 5,
+        vx: rand(-30, 30), vy: rand(-120, -50),
+        life: 0.4, maxLife: 0.4,
+        color: '#aa3030', size: 2,
+      });
+    }
+    if (e.skillStateLeft <= 0) {
+      const d = Math.hypot(p.x - e.x, p.y - e.y);
+      if (d < s.aoeRadius) {
+        damagePlayer(s.slamDamage * (e.damageMul || 1));
+      }
+      for (let i = 0; i < 26; i++) {
+        const a = rand(0, TAU);
+        game.particles.push({
+          x: e.x, y: e.y,
+          vx: Math.cos(a) * rand(180, 320),
+          vy: Math.sin(a) * rand(180, 320) - 60,
+          life: 0.6, maxLife: 0.6,
+          color: i % 2 ? '#aa3030' : '#5a2a2a',
+          size: 3,
+        });
+      }
+      // ground crack visual particles
+      for (let i = 0; i < 8; i++) {
+        game.particles.push({
+          x: e.x + rand(-s.aoeRadius * 0.7, s.aoeRadius * 0.7),
+          y: e.y, vx: 0, vy: -rand(80, 160),
+          life: 0.5, maxLife: 0.5,
+          color: '#7a4030', size: 2,
+        });
+      }
+      game.shake = Math.max(game.shake, 18);
+      e.skillState = 'idle';
+      e.skillNextAt = rollCooldown(e);
+    }
+    return true;
+  }
+  return false;
+}
+
+function skillRoll(e, p, dt) {
+  const s = e.type.skill;
+  if (e.skillState === 'idle') {
+    e.skillNextAt -= dt;
+    if (e.skillNextAt <= 0) {
+      // 50% chance to actually roll on cooldown trigger
+      if (Math.random() < 0.55) {
+        e.skillState = 'active';
+        e.skillStateLeft = s.rollTime;
+        e.rollDir = Math.random() < 0.5 ? -1 : 1;
+        e.invuln = s.iframes;
+      }
+      e.skillNextAt = rollCooldown(e);
+    }
+    return false;
+  }
+  if (e.skillState === 'active') {
+    e.skillStateLeft -= dt;
+    e.y += e.rollDir * s.rollSpeed * dt;
+    e.y = clamp(e.y, bandTop, bandBot);
+    if (Math.random() < 0.5) {
+      game.particles.push({
+        x: e.x + rand(-8, 8), y: e.y - 5,
+        vx: rand(-20, 20), vy: rand(-30, 0),
+        life: 0.3, maxLife: 0.3,
+        color: '#5a8a5a', size: 1.5,
+      });
+    }
+    if (e.skillStateLeft <= 0) e.skillState = 'idle';
+    return true;
+  }
+  return false;
+}
+
+function skillBlink(e, p, dt) {
+  if (e.skillState === 'idle') {
+    e.skillNextAt -= dt;
+    if (e.skillNextAt <= 0) {
+      // burst at old position
+      for (let i = 0; i < 14; i++) {
+        const a = rand(0, TAU);
+        game.particles.push({
+          x: e.x, y: e.y - e.h * 0.4,
+          vx: Math.cos(a) * 110, vy: Math.sin(a) * 110,
+          life: 0.45, maxLife: 0.45,
+          color: '#a060c0', size: 2,
+        });
+      }
+      // teleport near player
+      const side = Math.random() < 0.5 ? -1 : 1;
+      e.x = p.x + side * rand(70, 130);
+      e.y = clamp(p.y + rand(-30, 30), bandTop - 30, bandBot - 50);
+      // burst at new position
+      for (let i = 0; i < 14; i++) {
+        const a = rand(0, TAU);
+        game.particles.push({
+          x: e.x, y: e.y - e.h * 0.4,
+          vx: Math.cos(a) * 110, vy: Math.sin(a) * 110,
+          life: 0.45, maxLife: 0.45,
+          color: '#d8a0ff', size: 2,
+        });
+      }
+      e.invuln = 0.2;
+      e.skillNextAt = rollCooldown(e);
+    }
+  }
+  return false;
+}
+
+function skillShieldBash(e, p, dt) {
+  const s = e.type.skill;
+  if (e.skillState === 'idle') {
+    e.skillNextAt -= dt;
+    if (e.skillNextAt <= 0) {
+      const d = Math.hypot(p.x - e.x, p.y - e.y);
+      if (d < s.range) {
+        e.skillState = 'windup';
+        e.skillStateLeft = s.windup;
+      } else {
+        e.skillNextAt = 0.35;
+      }
+    }
+    return false;
+  }
+  if (e.skillState === 'windup') {
+    e.skillStateLeft -= dt;
+    if (e.skillStateLeft <= 0) {
+      e.skillState = 'active';
+      e.skillStateLeft = s.dashTime;
+      const dx = p.x - e.x, dy = p.y - e.y;
+      const d = Math.hypot(dx, dy) || 1;
+      e.bashVx = (dx / d) * s.dashSpeed;
+      e.bashVy = (dy / d) * s.dashSpeed * 0.5;
+    }
+    return true;
+  }
+  if (e.skillState === 'active') {
+    e.skillStateLeft -= dt;
+    e.x += e.bashVx * dt;
+    e.y += e.bashVy * dt;
+    e.y = clamp(e.y, bandTop, bandBot);
+    const dx = p.x - e.x, dy = p.y - e.y;
+    if (dx*dx + dy*dy < (e.r + 18) * (e.r + 18) && e.contactTimer <= 0) {
+      damagePlayer(s.bashDamage * (e.damageMul || 1));
+      e.contactTimer = 1.0;
+    }
+    if (Math.random() < 0.5) {
+      game.particles.push({
+        x: e.x, y: e.y,
+        vx: rand(-40, 40), vy: rand(-40, 0),
+        life: 0.3, maxLife: 0.3,
+        color: '#888', size: 2,
+      });
+    }
+    if (e.skillStateLeft <= 0) {
+      e.skillState = 'idle';
+      e.skillNextAt = rollCooldown(e);
+    }
+    return true;
+  }
+  return false;
+}
+
 // ============ Shop ============
 // basePrice : initial cost; priceMul : multiplier applied per existing stack;
 // maxStacks : cap on how many times a stackable upgrade can be bought.
@@ -1121,10 +1434,15 @@ function update(dt) {
     e.bobble += dt * (e.type.flying ? 6 : 3);
     e.walkPhase += dt * 10;
 
+    // Skill state machine — may override default movement
+    const skillOverrides = updateEnemySkill(e, p, dt);
+
     if (e.knockback > 0) {
       e.x += e.knockbackDir * e.knockback * dt * 6;
       e.knockback -= e.knockback * dt * 8 + 30 * dt;
       if (e.knockback < 5) e.knockback = 0;
+    } else if (skillOverrides) {
+      // skill is driving the enemy this frame, no default movement
     } else {
       // Goblin tries to keep distance
       if (e.typeId === 'goblin') {
@@ -1784,6 +2102,22 @@ function drawEnemy(e) {
     ctx.fillRect(bx, by, bw * (e.hp / e.maxHp), 4);
     ctx.strokeStyle = e.elite ? 'rgba(255, 200, 100, 0.5)' : 'rgba(255, 255, 255, 0.15)';
     ctx.strokeRect(bx, by, bw, 4);
+  }
+
+  // Windup telegraph "!" above enemies about to use a skill
+  if (!dying && e.skillState === 'windup') {
+    const cy = y - e.h - 30;
+    const scale = 1 + Math.sin(game.t * 14) * 0.18;
+    ctx.save();
+    ctx.translate(x, cy);
+    ctx.scale(scale, scale);
+    ctx.font = 'bold 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillText('!', 1, 1);
+    ctx.fillStyle = '#ff3030';
+    ctx.fillText('!', 0, 0);
+    ctx.restore();
   }
 
   // Elite crown indicator
