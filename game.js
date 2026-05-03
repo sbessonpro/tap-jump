@@ -1890,6 +1890,44 @@ function update(dt) {
     pr.y += pr.vy * dt;
     pr.life -= dt;
 
+    // Particle trails per projectile kind
+    if (pr.kind === 'shadowBolt' && Math.random() < 0.7) {
+      game.particles.push({
+        x: pr.x + rand(-3, 3), y: pr.y + rand(-3, 3),
+        vx: rand(-25, 25), vy: rand(-25, 25),
+        life: 0.4, maxLife: 0.4,
+        color: '#a060c0', size: 2.5,
+      });
+    } else if (pr.kind === 'fireball' && Math.random() < 0.85) {
+      game.particles.push({
+        x: pr.x, y: pr.y,
+        vx: rand(-20, 20), vy: rand(-50, -10),
+        life: 0.45, maxLife: 0.45,
+        color: Math.random() < 0.5 ? '#ff8030' : '#ffe080', size: 3,
+      });
+    } else if (pr.kind === 'rock' && Math.random() < 0.4) {
+      game.particles.push({
+        x: pr.x, y: pr.y,
+        vx: rand(-15, 15), vy: rand(-15, 15),
+        life: 0.5, maxLife: 0.5,
+        color: '#7a6a4a', size: 2,
+      });
+    } else if (pr.kind === 'slashWave' && Math.random() < 0.7) {
+      game.particles.push({
+        x: pr.x + rand(-15, 15), y: pr.y + rand(-15, 15),
+        vx: rand(-15, 15), vy: rand(-15, 15),
+        life: 0.4, maxLife: 0.4,
+        color: '#80c0ff', size: 2.5,
+      });
+    } else if (pr.kind === 'arrow' && Math.random() < 0.4) {
+      game.particles.push({
+        x: pr.x, y: pr.y,
+        vx: rand(-8, 8), vy: rand(-8, 8),
+        life: 0.18, maxLife: 0.18,
+        color: '#e8dcb0', size: 1.4,
+      });
+    }
+
     if (pr.friendly) {
       // Slash wave: pierces multiple enemies, doesn't despawn on hit
       const isSlash = pr.kind === 'slashWave';
@@ -2105,6 +2143,24 @@ function drawPlayer() {
   drawPauldrons(p);
   drawHelm(p, walk);
   drawPlayerWeapon(p);
+  // Ring glow on hand (only if equipped)
+  const eq = getEquipPalette();
+  if (eq.ringRGB) {
+    const handX = p.facing * 18;
+    const handY = -p.h * 0.45;
+    const pulse = 0.55 + Math.sin(game.t * 5) * 0.30;
+    const glow = ctx.createRadialGradient(handX, handY, 0.5, handX, handY, 14);
+    glow.addColorStop(0, `rgba(${eq.ringRGB}, ${pulse})`);
+    glow.addColorStop(0.5, `rgba(${eq.ringRGB}, ${pulse * 0.4})`);
+    glow.addColorStop(1, `rgba(${eq.ringRGB}, 0)`);
+    ctx.fillStyle = glow;
+    ctx.fillRect(handX - 14, handY - 14, 28, 28);
+    // tiny gem dot
+    ctx.fillStyle = eq.ringHand;
+    ctx.beginPath();
+    ctx.arc(handX, handY, 1.6, 0, TAU);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -2142,14 +2198,26 @@ function drawLegs(p, walk) {
 function drawArmor(p) {
   const top = -p.h + 18;
   const bottom = -22;
+  const eq = getEquipPalette();
+  // Body plate gradient
   const grad = ctx.createLinearGradient(0, top, 0, bottom);
-  grad.addColorStop(0, p.flash > 0 ? '#ffffff' : '#2a2236');
-  grad.addColorStop(0.5, p.flash > 0 ? '#ffaaaa' : '#1a1422');
+  grad.addColorStop(0, p.flash > 0 ? '#ffffff' : eq.armorBase);
+  grad.addColorStop(0.5, p.flash > 0 ? '#ffaaaa' : eq.armorMid);
   grad.addColorStop(1, p.flash > 0 ? '#ffaaaa' : '#0e0a14');
   ctx.fillStyle = grad;
   roundRect(-16, top, 32, bottom - top, 4);
   ctx.fill();
-  ctx.fillStyle = p.flash > 0 ? '#ffd0d0' : '#3a2240';
+  // Tier 2/3: extra plate ridges (silver/gold lines across chest)
+  if (eq.armor >= 2) {
+    ctx.strokeStyle = eq.armorAccent;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-14, top + 8);  ctx.lineTo(14, top + 8);
+    ctx.moveTo(-15, bottom - 8); ctx.lineTo(15, bottom - 8);
+    ctx.stroke();
+  }
+  // Chest V crest
+  ctx.fillStyle = p.flash > 0 ? '#ffd0d0' : eq.armorAccent;
   ctx.beginPath();
   ctx.moveTo(0, top + 6);
   ctx.lineTo(-10, top + 22);
@@ -2159,12 +2227,20 @@ function drawArmor(p) {
   ctx.lineTo(10, top + 22);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = '#cc1818';
+  // Crest gem (shifts with armor tier)
+  ctx.fillStyle = eq.crestColor;
   ctx.fillRect(-1.5, top + 10, 3, 8);
+  // Belt
   ctx.fillStyle = '#1a0810';
   ctx.fillRect(-16, bottom - 4, 32, 4);
-  ctx.fillStyle = '#aa6020';
+  // Belt buckle
+  ctx.fillStyle = eq.armorBelt;
   ctx.fillRect(-3, bottom - 4, 6, 4);
+  // Tier 3: gold trim along bottom edge
+  if (eq.armor === 3) {
+    ctx.fillStyle = '#ffd860';
+    ctx.fillRect(-16, top + 1, 32, 1);
+  }
 }
 
 function drawPauldrons(p) {
@@ -2187,9 +2263,31 @@ function drawPauldrons(p) {
   }
 }
 
+function getEquipPalette() {
+  const eq = game.equipment || { helmet: 0, armor: 0, ring: 0 };
+  return {
+    helmet: eq.helmet,
+    armor: eq.armor,
+    ring: eq.ring,
+    helmBase:  ['#1c1820', '#3a2818', '#42424c', '#4a3a08'][eq.helmet],
+    helmAccent:['#0a0810', '#22140a', '#22222a', '#1a1408'][eq.helmet],
+    helmTrim:  [null,      '#aa7038', '#a0a0b8', '#ffd860'][eq.helmet],
+    visorRGB:  ['255, 60, 50', '255, 100, 30', '120, 200, 255', '255, 220, 80'][eq.helmet],
+    armorBase:   ['#2a2236', '#3a2818', '#3a3a48', '#4a3a08'][eq.armor],
+    armorMid:    ['#1a1422', '#22180a', '#1c1c28', '#2a1f04'][eq.armor],
+    armorAccent: ['#3a2240', '#7a4818', '#a0a0b8', '#ffd860'][eq.armor],
+    armorBelt:   ['#aa6020', '#cc8030', '#a0a0b8', '#ffd860'][eq.armor],
+    crestColor:  ['#cc1818', '#cc1818', '#cc1818', '#ff4040'][eq.armor],
+    ringHand: [null, '#ff6060', '#80c0ff', '#ffd840'][eq.ring],
+    ringRGB:  [null, '255, 96, 96', '128, 192, 255', '255, 216, 64'][eq.ring],
+  };
+}
+
 function drawHelm(p, walk) {
   const top = -p.h + 2;
-  ctx.fillStyle = p.flash > 0 ? '#ffffff' : '#1c1820';
+  const eq = getEquipPalette();
+  // Base helm
+  ctx.fillStyle = p.flash > 0 ? '#ffffff' : eq.helmBase;
   ctx.beginPath();
   ctx.moveTo(-13, top + 24);
   ctx.lineTo(-13, top + 8);
@@ -2199,7 +2297,13 @@ function drawHelm(p, walk) {
   ctx.lineTo(-p.facing * 9, top + 28);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = p.flash > 0 ? '#ffaaaa' : '#0a0810';
+  // Helm trim band (only with equipment)
+  if (eq.helmTrim) {
+    ctx.fillStyle = p.flash > 0 ? '#ffd0d0' : eq.helmTrim;
+    ctx.fillRect(-13, top + 22, 26, 2);
+  }
+  // Horns
+  ctx.fillStyle = p.flash > 0 ? '#ffaaaa' : eq.helmAccent;
   ctx.beginPath();
   ctx.moveTo(-12, top + 8);
   ctx.quadraticCurveTo(-22, top - 2, -18, top - 14);
@@ -2212,15 +2316,35 @@ function drawHelm(p, walk) {
   ctx.quadraticCurveTo(12, top - 4, 10, top + 6);
   ctx.closePath();
   ctx.fill();
+  // Horn tips with trim color (high tier)
+  if (eq.helmTrim && eq.helmet >= 2) {
+    ctx.fillStyle = eq.helmTrim;
+    ctx.beginPath();
+    ctx.arc(-19, top - 12, 2.5, 0, TAU);
+    ctx.arc(19, top - 12, 2.5, 0, TAU);
+    ctx.fill();
+  }
+  // Tier 3: gold crown spikes between horns
+  if (eq.helmet === 3) {
+    ctx.fillStyle = '#ffe080';
+    for (let i = -1; i <= 1; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * 5 - 1.5, top + 2);
+      ctx.lineTo(i * 5, top - 6);
+      ctx.lineTo(i * 5 + 1.5, top + 2);
+      ctx.fill();
+    }
+  }
+  // Visor glow (color shifts with helm tier)
   const glowAlpha = 0.7 + Math.sin(game.t * 6) * 0.2;
   const glow = ctx.createRadialGradient(p.facing * 1, top + 16, 1, p.facing * 1, top + 16, 14);
-  glow.addColorStop(0, `rgba(255, 60, 50, ${glowAlpha * 0.7})`);
-  glow.addColorStop(1, 'rgba(255, 60, 50, 0)');
+  glow.addColorStop(0, `rgba(${eq.visorRGB}, ${glowAlpha * 0.7})`);
+  glow.addColorStop(1, `rgba(${eq.visorRGB}, 0)`);
   ctx.fillStyle = glow;
   ctx.fillRect(-16, top + 6, 32, 22);
-  ctx.fillStyle = '#ff3030';
+  ctx.fillStyle = `rgb(${eq.visorRGB})`;
   ctx.fillRect(p.facing * 1 - 8, top + 14, 16, 2);
-  ctx.fillStyle = '#ffaaaa';
+  ctx.fillStyle = '#ffffff';
   ctx.fillRect(p.facing * 1 - 6, top + 14, 12, 1);
 }
 
@@ -2413,11 +2537,77 @@ function drawSwingArc(cx, cy, r, progress, color) {
 }
 
 // ============ Enemies ============
+function drawAttackTelegraph(e, x, y) {
+  let aoeRadius = 0;
+  let dirRange = 0;
+  let dirAngle = 0;
+
+  if (e.skillState === 'windup' && e.type.skill && e.type.skill.name === 'slam') {
+    aoeRadius = e.type.skill.aoeRadius;
+  } else if (e.isBoss && e.bossId === 'golem' && e.ai && e.ai.state === 'windup') {
+    const phase2 = e.hp < e.maxHp * 0.4;
+    aoeRadius = phase2 ? 240 : 200;
+  } else if (e.skillState === 'windup' && e.type.skill && e.type.skill.name === 'shieldBash') {
+    const p = game.player;
+    if (p) {
+      dirAngle = Math.atan2(p.y - e.y, p.x - e.x);
+      dirRange = e.type.skill.range || 150;
+    }
+  } else if (e.skillState === 'windup' && e.type.skill && e.type.skill.name === 'lunge') {
+    const p = game.player;
+    if (p) {
+      dirAngle = Math.atan2(p.y - e.y, p.x - e.x);
+      dirRange = e.type.skill.range || 110;
+    }
+  }
+
+  const pulse = 0.4 + Math.sin(game.t * 14) * 0.25;
+
+  if (aoeRadius > 0) {
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 40, 40, ${pulse * 0.18})`;
+    ctx.beginPath();
+    ctx.ellipse(x, y + 2, aoeRadius, aoeRadius * 0.32, 0, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255, 60, 60, ${pulse + 0.3})`;
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([10, 6]);
+    ctx.beginPath();
+    ctx.ellipse(x, y + 2, aoeRadius, aoeRadius * 0.32, 0, 0, TAU);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  if (dirRange > 0) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(dirAngle);
+    ctx.fillStyle = `rgba(255, 60, 60, ${pulse * 0.22})`;
+    ctx.fillRect(0, -14, dirRange, 28);
+    ctx.strokeStyle = `rgba(255, 60, 60, ${pulse + 0.3})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 4]);
+    ctx.strokeRect(0, -14, dirRange, 28);
+    ctx.setLineDash([]);
+    ctx.fillStyle = `rgba(255, 80, 80, ${pulse + 0.4})`;
+    ctx.beginPath();
+    ctx.moveTo(dirRange, -18);
+    ctx.lineTo(dirRange + 16, 0);
+    ctx.lineTo(dirRange, 18);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 function drawEnemy(e) {
   const x = sX(e.x), y = e.y;
   const bob = Math.sin(e.bobble) * (e.type.flying ? 7 : 2);
   const dying = e.dead;
   const alpha = dying ? Math.max(0, e.deathTimer / (e.isBoss ? 1.2 : 0.4)) : (e.type.ghostly ? 0.75 : 1);
+
+  // Attack telegraph (drawn first, on the ground, before other auras)
+  if (!dying) drawAttackTelegraph(e, x, y);
 
   // Menace aura on dangerous mob types (drawn first, behind everything)
   const menaceAuras = {
