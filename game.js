@@ -58,6 +58,38 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const TAU = Math.PI * 2;
 
+// ============ Persistent best run ============
+const SAVE_KEY = 'shadowcrawl-best';
+function loadBestRun() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return { stage: 0, distance: 0, kills: 0, coins: 0, bossesDefeated: 0 };
+    const parsed = JSON.parse(raw);
+    return {
+      stage: parsed.stage || 0,
+      distance: parsed.distance || 0,
+      kills: parsed.kills || 0,
+      coins: parsed.coins || 0,
+      bossesDefeated: parsed.bossesDefeated || 0,
+    };
+  } catch { return { stage: 0, distance: 0, kills: 0, coins: 0, bossesDefeated: 0 }; }
+}
+function saveBestRun(stats) {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(stats)); } catch {}
+}
+function updateBestRun(current) {
+  const best = loadBestRun();
+  const newBest = {
+    stage:           Math.max(best.stage, current.stage),
+    distance:        Math.max(best.distance, current.distance),
+    kills:           Math.max(best.kills, current.kills),
+    coins:           Math.max(best.coins, current.coins),
+    bossesDefeated:  Math.max(best.bossesDefeated, current.bossesDefeated),
+  };
+  saveBestRun(newBest);
+  return newBest;
+}
+
 // ============ Input ============
 const input = {
   move: { x: 0, y: 0 },
@@ -400,9 +432,9 @@ function spawnEnemy(typeId, x, y) {
   const t = ENEMY_TYPES[typeId];
   const stage = game.stage;
   // Per-stage scaling — harder enemies as you progress (with caps)
-  const stageHpMul    = 1 + Math.min(2.0, (stage - 1) * 0.22);
-  const stageSpeedMul = 1 + Math.min(0.6, (stage - 1) * 0.10);
-  const stageDmgMul   = 1 + Math.min(1.8, (stage - 1) * 0.22);
+  const stageHpMul    = 1 + Math.min(1.8, (stage - 1) * 0.20);
+  const stageSpeedMul = 1 + Math.min(0.5, (stage - 1) * 0.10);
+  const stageDmgMul   = 1 + Math.min(1.0, (stage - 1) * 0.15);
 
   // Elite chance: 0% at stage 1, +12% at stage 2, +5% per stage after, capped
   const eliteChance = stage >= 2 ? Math.min(0.35, 0.12 + (stage - 2) * 0.05) : 0;
@@ -1233,8 +1265,8 @@ const SHOP_ITEMS = [
   { id: 'heal_small',  name: 'Potion mineure',   desc: '+50 PV',                  basePrice: 25,  priceMul: 1.0, icon: '❤️', apply: () => { game.player.hp = Math.min(game.player.maxHp, game.player.hp + 50); refreshHpUI(); } },
   { id: 'heal_full',   name: 'Potion majeure',   desc: 'Soin total',              basePrice: 60,  priceMul: 1.0, icon: '🧪', apply: () => { game.player.hp = game.player.maxHp; refreshHpUI(); } },
   { id: 'maxhp',       name: 'Vitalité',         desc: '+25 PV max',              basePrice: 90,  priceMul: 1.6, maxStacks: 5, icon: '💪', apply: () => { game.player.maxHp += 25; game.player.hp += 25; refreshHpUI(); } },
-  { id: 'damage',      name: 'Force',            desc: '+20% dégâts',             basePrice: 110, priceMul: 1.7, maxStacks: 5, icon: '⚡', apply: () => { game.upgrades.damageMul *= 1.2; } },
-  { id: 'speed',       name: 'Agilité',          desc: '+12% vitesse',            basePrice: 80,  priceMul: 2.0, maxStacks: 3, icon: '👟', apply: () => { game.upgrades.speedMul *= 1.12; } },
+  { id: 'damage',      name: 'Force',            desc: '+20% dégâts',             basePrice: 110, priceMul: 1.7, maxStacks: 5, icon: '⚡', apply: () => { game.upgrades.damageMul = Math.min(3.0, game.upgrades.damageMul * 1.2); } },
+  { id: 'speed',       name: 'Agilité',          desc: '+12% vitesse',            basePrice: 80,  priceMul: 2.0, maxStacks: 3, icon: '👟', apply: () => { game.upgrades.speedMul = Math.min(1.5, game.upgrades.speedMul * 1.12); } },
   { id: 'unlock_dagger',  name: 'Dague',            desc: 'Mêlée très rapide',                basePrice: 90,  priceMul: 1, icon: '🗡', once: true, apply: () => { game.unlockedWeapons.add('dagger'); } },
   { id: 'unlock_spear',   name: 'Lance',            desc: 'Mêlée longue portée',              basePrice: 140, priceMul: 1, icon: '🔱', once: true, apply: () => { game.unlockedWeapons.add('spear'); } },
   { id: 'unlock_magic',   name: 'Épée mystique',    desc: 'Lance une onde de slash',          basePrice: 240, priceMul: 1, icon: '✨', once: true, apply: () => { game.unlockedWeapons.add('magicSword'); } },
@@ -2984,14 +3016,36 @@ function gameOver() {
   game.paused = false;
   shopModal.classList.remove('visible');
   bossBar.classList.remove('visible');
-  overlay.querySelector('h1').textContent = 'Tu es tombé';
-  overlay.querySelector('.subtitle').textContent =
-    `Étage ${game.stage} · ${game.kills} ennemis · ${Math.floor(game.cameraX / 50)} m · ${game.coins} pièces`;
+  const distance = Math.floor(game.cameraX / 50);
+  const current = {
+    stage: game.stage,
+    distance,
+    kills: game.kills,
+    coins: game.coins,
+    bossesDefeated: game.bossesDefeated,
+  };
+  const prevBest = loadBestRun();
+  const best = updateBestRun(current);
+  const isNewRecord = current.stage > prevBest.stage
+    || (current.stage === prevBest.stage && current.distance > prevBest.distance);
+  overlay.querySelector('h1').textContent = isNewRecord ? 'Nouveau record !' : 'Tu es tombé';
+  overlay.querySelector('.subtitle').innerHTML =
+    `Étage ${current.stage} · ${current.distance} m · ${current.kills} kills · ${current.coins} ⛁`
+    + `<br><span style="font-size:11px;opacity:0.7;letter-spacing:2px;">Record : étage ${best.stage} · ${best.distance} m · ${best.bossesDefeated} boss</span>`;
   startBtn.textContent = 'Recommencer';
   overlay.classList.add('visible');
 }
 
+function refreshStartOverlay() {
+  const best = loadBestRun();
+  if (best.stage > 0) {
+    overlay.querySelector('.subtitle').innerHTML =
+      `Avance dans les ténèbres<br><span style="font-size:11px;opacity:0.7;letter-spacing:2px;">Record : étage ${best.stage} · ${best.distance} m · ${best.bossesDefeated} boss</span>`;
+  }
+}
+
 startBtn.addEventListener('click', startGame);
+refreshStartOverlay();
 updateWeaponUI();
 requestAnimationFrame(loop);
 })();
