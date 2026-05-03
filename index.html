@@ -21,7 +21,11 @@
       <div class="hud-right">
         <div id="coins">⛁ 0</div>
         <div id="kills">☠ 0</div>
-        <button id="shop-btn" class="hud-btn">🏪 Boutique</button>
+        <div class="hud-btn-row">
+          <button id="pause-btn" class="hud-btn-icon" title="Pause">⏸</button>
+          <button id="mute-btn" class="hud-btn-icon" title="Son">🔊</button>
+          <button id="shop-btn" class="hud-btn">🏪 Boutique</button>
+        </div>
       </div>
     </div>
 
@@ -69,6 +73,15 @@
       </div>
     </div>
 
+    <!-- Pause modal -->
+    <div id="pause-modal">
+      <div class="pause-panel">
+        <h2>Pause</h2>
+        <button id="pause-resume" class="pause-btn-big">Reprendre</button>
+        <button id="pause-quit" class="pause-btn-big secondary">Abandonner</button>
+      </div>
+    </div>
+
     <!-- Overlay screens -->
     <div id="overlay" class="visible">
       <h1>Shadow Crawl</h1>
@@ -79,6 +92,11 @@
         <div><span class="kbd">⚔/🏹/🔨</span> changer d'arme</div>
         <div><span class="kbd">Boutique</span> acheter des bonus</div>
       </div>
+      <label id="challenge-toggle" class="challenge-toggle">
+        <input type="checkbox" id="challenge-input" />
+        <span class="track"></span>
+        <span class="label">Mode Challenge — pas d'auto-scroll, ×1.5 pièces</span>
+      </label>
       <button id="start-btn">Entrer dans le donjon</button>
     </div>
   </div>

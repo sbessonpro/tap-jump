@@ -34,6 +34,12 @@ const bossIntroSub = bossIntro.querySelector('.boss-intro-sub');
 const stageToast = document.getElementById('stage-toast');
 const stageToastTitle = stageToast.querySelector('.stage-toast-title');
 const stageToastSub = stageToast.querySelector('.stage-toast-sub');
+const pauseBtn = document.getElementById('pause-btn');
+const muteBtn = document.getElementById('mute-btn');
+const pauseModal = document.getElementById('pause-modal');
+const pauseResume = document.getElementById('pause-resume');
+const pauseQuit = document.getElementById('pause-quit');
+const challengeInput = document.getElementById('challenge-input');
 
 let W = 0, H = 0;
 const DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -57,6 +63,107 @@ resize();
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const TAU = Math.PI * 2;
+
+// ============ Audio (procedural Web Audio) ============
+const audio = (() => {
+  let ctx = null, masterGain = null, muted = false;
+
+  function ensureCtx() {
+    if (!ctx) {
+      try {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        masterGain = ctx.createGain();
+        masterGain.gain.value = 0.35;
+        masterGain.connect(ctx.destination);
+      } catch (e) { return false; }
+    }
+    if (ctx.state === 'suspended') ctx.resume();
+    return true;
+  }
+
+  function noiseBuffer(duration) {
+    const sr = ctx.sampleRate;
+    const buf = ctx.createBuffer(1, Math.max(1, Math.floor(sr * duration)), sr);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+    }
+    return buf;
+  }
+
+  function tone({ freq = 440, duration = 0.1, volume = 0.3, type = 'square', sweepTo = null, filter = null, delay = 0 }) {
+    if (muted || !ensureCtx()) return;
+    const t = ctx.currentTime + delay;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(volume, t + 0.005);
+    env.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (sweepTo !== null) osc.frequency.exponentialRampToValueAtTime(Math.max(20, sweepTo), t + duration);
+    let outNode = env;
+    osc.connect(env);
+    if (filter) {
+      const f = ctx.createBiquadFilter();
+      f.type = filter.type || 'lowpass';
+      f.frequency.value = filter.freq || 1000;
+      f.Q.value = filter.q || 1;
+      env.connect(f);
+      outNode = f;
+    }
+    outNode.connect(masterGain);
+    osc.start(t);
+    osc.stop(t + duration + 0.05);
+  }
+
+  function noise({ duration = 0.1, volume = 0.3, filter = null, delay = 0 }) {
+    if (muted || !ensureCtx()) return;
+    const t = ctx.currentTime + delay;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(volume, t + 0.005);
+    env.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(duration);
+    src.connect(env);
+    let outNode = env;
+    if (filter) {
+      const f = ctx.createBiquadFilter();
+      f.type = filter.type || 'bandpass';
+      f.frequency.value = filter.freq || 1000;
+      f.Q.value = filter.q || 1;
+      env.connect(f);
+      outNode = f;
+    }
+    outNode.connect(masterGain);
+    src.start(t);
+    src.stop(t + duration + 0.05);
+  }
+
+  // Pre-defined SFX
+  return {
+    ensure: ensureCtx,
+    setMuted(m) { muted = m; },
+    isMuted() { return muted; },
+
+    swing()    { noise({ duration: 0.12, volume: 0.18, filter: { type: 'bandpass', freq: 2000, q: 0.8 } }); },
+    swingHeavy(){ noise({ duration: 0.22, volume: 0.30, filter: { type: 'bandpass', freq: 700, q: 0.6 } }); },
+    swingFast(){ noise({ duration: 0.06, volume: 0.14, filter: { type: 'highpass', freq: 3000 } }); },
+    arrowShoot(){ tone({ freq: 1400, sweepTo: 600, duration: 0.10, volume: 0.18, type: 'triangle' }); noise({ duration: 0.08, volume: 0.08, filter: { type: 'highpass', freq: 4000 } }); },
+    hit()      { tone({ freq: 240, sweepTo: 90, duration: 0.10, volume: 0.30, type: 'square' }); noise({ duration: 0.06, volume: 0.18, filter: { type: 'lowpass', freq: 800 } }); },
+    hitBig()   { tone({ freq: 90, sweepTo: 40, duration: 0.30, volume: 0.45, type: 'sawtooth' }); noise({ duration: 0.18, volume: 0.25, filter: { type: 'lowpass', freq: 300 } }); },
+    enemyDie() { tone({ freq: 200, sweepTo: 80, duration: 0.25, volume: 0.30, type: 'sawtooth' }); },
+    bossDie()  { tone({ freq: 200, sweepTo: 50, duration: 1.4, volume: 0.5, type: 'sawtooth' }); tone({ freq: 80, sweepTo: 30, duration: 1.4, volume: 0.4, type: 'square', delay: 0.05 }); },
+    coin()     { tone({ freq: 1500, duration: 0.06, volume: 0.18, type: 'sine' }); tone({ freq: 2200, duration: 0.08, volume: 0.14, type: 'sine', delay: 0.04 }); },
+    hurt()     { tone({ freq: 320, sweepTo: 120, duration: 0.22, volume: 0.40, type: 'sawtooth' }); noise({ duration: 0.12, volume: 0.20, filter: { type: 'lowpass', freq: 600 } }); },
+    death()    { tone({ freq: 240, sweepTo: 50, duration: 1.0, volume: 0.5, type: 'sawtooth' }); },
+    bossSpawn(){ tone({ freq: 60, duration: 1.2, volume: 0.5, type: 'sawtooth' }); tone({ freq: 120, duration: 1.2, volume: 0.3, type: 'square', delay: 0.1 }); },
+    click()    { tone({ freq: 700, duration: 0.04, volume: 0.18, type: 'square' }); },
+    purchase() { tone({ freq: 800, duration: 0.07, volume: 0.20, type: 'sine' }); tone({ freq: 1200, duration: 0.10, volume: 0.16, type: 'sine', delay: 0.06 }); },
+    levelUp()  { tone({ freq: 600, duration: 0.10, volume: 0.30, type: 'triangle' }); tone({ freq: 900, duration: 0.10, volume: 0.30, type: 'triangle', delay: 0.08 }); tone({ freq: 1300, duration: 0.18, volume: 0.30, type: 'triangle', delay: 0.18 }); },
+  };
+})();
 
 // ============ Persistent best run ============
 const SAVE_KEY = 'shadowcrawl-best';
@@ -227,6 +334,8 @@ const game = {
   bossActive: false,
   boss: null,
   bossNextAt: 250,           // distance in meters for next boss spawn
+  challengeMode: false,      // disables auto-scroll, ×1.5 coins
+  pauseFromMenu: false,      // pause triggered by pause button (vs shop)
   bossesDefeated: 0,
   unlockedWeapons: null,     // Set, set in startGame
   upgrades: {
@@ -284,6 +393,9 @@ function attackPlayer() {
       }
     }
     spawnSwingParticles(p, w);
+    if (w.id === 'hammer') audio.swingHeavy();
+    else if (w.id === 'dagger') audio.swingFast();
+    else audio.swing();
     if (w.slashWave) {
       // Spawn forward slash wave projectile
       game.projectiles.push({
@@ -313,6 +425,7 @@ function attackPlayer() {
       life: 1.4,
       friendly: true,
     });
+    audio.arrowShoot();
     game.shake = Math.max(game.shake, 3);
   }
 }
@@ -581,12 +694,14 @@ function damageEnemy(e, dmg, knockback, source) {
     life: 0.7, maxLife: 0.7,
     color: dmg >= 50 ? '#ffcc40' : '#ff7070',
   });
+  if (dmg >= 50 || e.isBoss) audio.hitBig(); else audio.hit();
   if (e.hp <= 0 && !e.dead) {
     e.dead = true;
     e.deathTimer = e.isBoss ? 1.2 : 0.4;
     game.kills += 1;
     killsEl.textContent = '☠ ' + game.kills;
     spawnDeathParticles(e);
+    if (e.isBoss) audio.bossDie(); else audio.enemyDie();
     let [lo, hi] = e.type.coinDrop;
     if (e.elite) { lo = Math.round(lo * 1.8); hi = Math.round(hi * 1.8); }
     const n = Math.floor(rand(lo, hi + 1));
@@ -634,8 +749,9 @@ function damagePlayer(amount) {
   p.invuln = 0.7;
   p.flash = 0.25;
   game.shake = Math.max(game.shake, 10);
+  audio.hurt();
   refreshHpUI();
-  if (p.hp <= 0) gameOver();
+  if (p.hp <= 0) { audio.death(); gameOver(); }
 }
 
 // ============ Pickups ============
@@ -667,7 +783,10 @@ function updatePickups(dt) {
         c.y += (dy / d) * sp * dt;
         if (d < COIN_PICK) {
           c.life = 0;
-          game.coins += 1;
+          let gain = 1;
+          if (game.challengeMode && Math.random() < 0.5) gain = 2; // averages ×1.5
+          game.coins += gain;
+          audio.coin();
           coinsEl.textContent = '⛁ ' + game.coins;
           for (let i = 0; i < 6; i++) {
             game.particles.push({
@@ -737,6 +856,7 @@ function triggerBossSpawn() {
   bossNameEl.textContent = t.name;
   bossHpEl.style.width = '100%';
   bossBar.classList.add('visible');
+  audio.bossSpawn();
 }
 
 function onBossDefeated(boss) {
@@ -762,6 +882,7 @@ function onBossDefeated(boss) {
   void stageToast.offsetWidth;
   stageToast.classList.add('visible');
   setTimeout(() => stageToast.classList.remove('visible'), 3100);
+  audio.levelUp();
 }
 
 function updateBoss(dt) {
@@ -1349,6 +1470,7 @@ function buyItem(item) {
     game.upgrades.stacks[item.id] = getStacks(item.id) + 1;
   }
   item.apply();
+  audio.purchase();
   coinsEl.textContent = '⛁ ' + game.coins;
   renderShop();
 }
@@ -1397,10 +1519,12 @@ function update(dt) {
   p.moving = Math.abs(mx) > 0.05 || Math.abs(my) > 0.05;
   if (p.moving) p.walkPhase += dt * 13;
 
-  // Auto-scroll: world advances even when player stops, except during boss fights
+  // Auto-scroll: world advances even when player stops, except during boss fights or Challenge mode
   if (!game.bossActive) {
-    const baseScroll = 40 + Math.min(40, (game.stage - 1) * 6);
-    game.cameraX += baseScroll * dt;
+    if (!game.challengeMode) {
+      const baseScroll = 40 + Math.min(40, (game.stage - 1) * 6);
+      game.cameraX += baseScroll * dt;
+    }
     const targetCam = p.x - W * 0.35;
     game.cameraX = Math.max(game.cameraX, targetCam);
   }
@@ -2973,7 +3097,10 @@ function updateWeaponUI() {
 function startGame() {
   overlay.classList.remove('visible');
   shopModal.classList.remove('visible');
+  pauseModal.classList.remove('visible');
   bossBar.classList.remove('visible');
+  game.challengeMode = challengeInput.checked;
+  game.pauseFromMenu = false;
   bossIntro.classList.remove('visible');
   stageToast.classList.remove('visible');
   game.running = true;
@@ -3044,7 +3171,86 @@ function refreshStartOverlay() {
   }
 }
 
-startBtn.addEventListener('click', startGame);
+// ============ Pause / Mute / Challenge ============
+function openPauseMenu() {
+  if (!game.running || game.paused) return;
+  game.paused = true;
+  game.pauseFromMenu = true;
+  input.move.x = 0; input.move.y = 0;
+  input.attack = false;
+  joyTouchId = null;
+  joyStick.style.transform = 'translate(-50%, -50%)';
+  pauseModal.classList.add('visible');
+}
+
+function closePauseMenu() {
+  pauseModal.classList.remove('visible');
+  if (game.pauseFromMenu) {
+    game.paused = false;
+    game.pauseFromMenu = false;
+  }
+}
+
+function quitToMainMenu() {
+  pauseModal.classList.remove('visible');
+  game.pauseFromMenu = false;
+  gameOver();
+}
+
+pauseBtn.addEventListener('click', () => { audio.click(); openPauseMenu(); });
+pauseResume.addEventListener('click', () => { audio.click(); closePauseMenu(); });
+pauseQuit.addEventListener('click', () => { audio.click(); quitToMainMenu(); });
+
+// Mute toggle
+const MUTE_KEY = 'shadowcrawl-muted';
+function applyMutedState() {
+  const m = localStorage.getItem(MUTE_KEY) === '1';
+  audio.setMuted(m);
+  muteBtn.textContent = m ? '🔇' : '🔊';
+  muteBtn.classList.toggle('muted', m);
+}
+muteBtn.addEventListener('click', () => {
+  const cur = audio.isMuted();
+  const next = !cur;
+  localStorage.setItem(MUTE_KEY, next ? '1' : '0');
+  applyMutedState();
+  if (!next) audio.click();
+});
+applyMutedState();
+
+// Challenge mode persistence
+const CHALLENGE_KEY = 'shadowcrawl-challenge';
+challengeInput.checked = localStorage.getItem(CHALLENGE_KEY) === '1';
+challengeInput.addEventListener('change', () => {
+  localStorage.setItem(CHALLENGE_KEY, challengeInput.checked ? '1' : '0');
+});
+
+// First user gesture: unlock audio context (required by browsers)
+function unlockAudio() {
+  audio.ensure();
+  window.removeEventListener('pointerdown', unlockAudio);
+  window.removeEventListener('keydown', unlockAudio);
+}
+window.addEventListener('pointerdown', unlockAudio);
+window.addEventListener('keydown', unlockAudio);
+
+// ESC closes pause/shop
+window.addEventListener('keydown', e => {
+  if (e.code === 'Escape') {
+    if (game.paused) {
+      if (shopModal.classList.contains('visible')) closeShop();
+      else if (pauseModal.classList.contains('visible')) closePauseMenu();
+    } else if (game.running) {
+      openPauseMenu();
+    }
+  }
+  if (e.code === 'KeyP' && game.running) {
+    if (game.pauseFromMenu) closePauseMenu();
+    else if (!game.paused) openPauseMenu();
+  }
+});
+
+startBtn.addEventListener('click', () => { audio.ensure(); startGame(); });
 refreshStartOverlay();
 updateWeaponUI();
 requestAnimationFrame(loop);
