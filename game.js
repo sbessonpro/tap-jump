@@ -40,6 +40,12 @@ const pauseModal = document.getElementById('pause-modal');
 const pauseResume = document.getElementById('pause-resume');
 const pauseQuit = document.getElementById('pause-quit');
 const challengeInput = document.getElementById('challenge-input');
+const forgeBtn = document.getElementById('forge-btn');
+const forgeModal = document.getElementById('forge-modal');
+const forgeClose = document.getElementById('forge-close');
+const forgeList = document.getElementById('forge-list');
+const forgeEssenceEl = document.getElementById('forge-essence');
+const essenceCountEl = document.getElementById('essence-count');
 
 let W = 0, H = 0;
 const DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -195,6 +201,56 @@ function updateBestRun(current) {
   };
   saveBestRun(newBest);
   return newBest;
+}
+
+// ============ Forge (persistent equipment) ============
+const FORGE_KEY = 'shadowcrawl-forge';
+const HELM_HP    = [0, 25, 60, 120];     // tier 0..3
+const ARMOR_DR   = [0, 0.08, 0.16, 0.25];
+const RING_DMG   = [1, 1.10, 1.20, 1.35];
+
+const FORGE_TIERS = [
+  // helmet
+  { slot: 'helmet', tier: 1, name: 'Casque de bronze',  desc: '+25 PV max',  cost: 15,  icon: '🪖' },
+  { slot: 'helmet', tier: 2, name: 'Heaume d\'argent',  desc: '+60 PV max',  cost: 45,  icon: '🪖' },
+  { slot: 'helmet', tier: 3, name: 'Couronne d\'or',    desc: '+120 PV max', cost: 110, icon: '👑' },
+  // armor
+  { slot: 'armor',  tier: 1, name: 'Cotte de bronze',   desc: '-8% dégâts subis',   cost: 18,  icon: '🥉' },
+  { slot: 'armor',  tier: 2, name: 'Plates d\'argent',  desc: '-16% dégâts subis',  cost: 50,  icon: '🥈' },
+  { slot: 'armor',  tier: 3, name: 'Armure d\'or',      desc: '-25% dégâts subis',  cost: 130, icon: '🥇' },
+  // ring
+  { slot: 'ring',   tier: 1, name: 'Anneau de bronze',  desc: '+10% dégâts',  cost: 22,  icon: '💍' },
+  { slot: 'ring',   tier: 2, name: 'Anneau d\'argent',  desc: '+20% dégâts',  cost: 60,  icon: '💍' },
+  { slot: 'ring',   tier: 3, name: 'Anneau d\'or',      desc: '+35% dégâts',  cost: 150, icon: '💎' },
+];
+
+const SLOT_LABELS = { helmet: 'Casque', armor: 'Armure', ring: 'Anneau' };
+
+function loadForge() {
+  try {
+    const raw = localStorage.getItem(FORGE_KEY);
+    if (!raw) return { essences: 0, helmet: 0, armor: 0, ring: 0 };
+    const parsed = JSON.parse(raw);
+    return {
+      essences: parsed.essences || 0,
+      helmet: parsed.helmet || 0,
+      armor: parsed.armor || 0,
+      ring: parsed.ring || 0,
+    };
+  } catch { return { essences: 0, helmet: 0, armor: 0, ring: 0 }; }
+}
+
+function saveForge(state) {
+  try { localStorage.setItem(FORGE_KEY, JSON.stringify(state)); } catch {}
+}
+
+function gainEssences(coins) {
+  const gained = Math.floor(coins / 30);
+  if (gained <= 0) return 0;
+  const f = loadForge();
+  f.essences += gained;
+  saveForge(f);
+  return gained;
 }
 
 // ============ Input ============
@@ -537,9 +593,29 @@ const BOSSES = {
     isBoss: true,
     flying: true,
   },
+  necromancer: {
+    bossId: 'necromancer',
+    name: 'Le Nécromancien',
+    w: 50, h: 86, r: 32,
+    hp: 1400, speed: 65, damage: 22,
+    coinDrop: [200, 280],
+    contactCooldown: 1.0,
+    color: '#1a3a2a', accent: '#80ffaa',
+    isBoss: true,
+  },
+  golem: {
+    bossId: 'golem',
+    name: 'Le Golem de Pierre',
+    w: 84, h: 102, r: 44,
+    hp: 2400, speed: 55, damage: 38,
+    coinDrop: [280, 380],
+    contactCooldown: 1.2,
+    color: '#5a4a3a', accent: '#d8b870',
+    isBoss: true,
+  },
 };
 
-const BOSS_ORDER = ['liche', 'champion', 'dragon'];
+const BOSS_ORDER = ['liche', 'champion', 'dragon', 'necromancer', 'golem'];
 
 function spawnEnemy(typeId, x, y) {
   const t = ENEMY_TYPES[typeId];
@@ -745,6 +821,8 @@ function spawnCoin(e) {
 function damagePlayer(amount) {
   const p = game.player;
   if (p.invuln > 0) return;
+  // Persistent armor damage reduction
+  amount = amount * (1 - (game.equipDR || 0));
   p.hp -= amount;
   p.invuln = 0.7;
   p.flash = 0.25;
@@ -896,6 +974,8 @@ function updateBoss(dt) {
   if (b.bossId === 'liche') updateLiche(b, p, dt);
   else if (b.bossId === 'champion') updateChampion(b, p, dt);
   else if (b.bossId === 'dragon') updateDragon(b, p, dt);
+  else if (b.bossId === 'necromancer') updateNecromancer(b, p, dt);
+  else if (b.bossId === 'golem') updateGolem(b, p, dt);
 
   // Keep boss inside the arena (prevents charge from carrying him offscreen left)
   if (b.x < game.cameraX - 40) b.x = game.cameraX - 40;
@@ -1072,6 +1152,152 @@ function updateDragon(b, p, dt) {
     }
   }
   b.bobble += dt * 6;
+  basicContact(b, p);
+  if (b.knockback > 0) {
+    b.x += b.knockbackDir * b.knockback * dt * 4;
+    b.knockback -= b.knockback * dt * 8 + 30 * dt;
+    if (b.knockback < 5) b.knockback = 0;
+  }
+}
+
+function updateNecromancer(b, p, dt) {
+  const ai = b.ai;
+  const dx = p.x - b.x, dy = p.y - b.y;
+  const d = Math.hypot(dx, dy) || 1;
+  const target = 280;
+  const moveSign = d > target + 30 ? 1 : (d < target - 30 ? -1 : 0);
+  if (b.knockback <= 0) {
+    b.x += moveSign * (dx / d) * b.speed * dt;
+    b.y += moveSign * (dy / d) * b.speed * dt * 0.7;
+    b.y = clamp(b.y, bandTop, bandBot);
+  }
+  b.bobble += dt * 4;
+  if (ai.attackTimer <= 0) {
+    const phase2 = b.hp < b.maxHp * 0.5;
+    const r = Math.random();
+    if (r < 0.45) {
+      const n = phase2 ? 3 : 2;
+      for (let i = 0; i < n; i++) spawnAt('skeleton', b.x + rand(-50, 50));
+      for (let i = 0; i < 16; i++) {
+        const a = rand(0, TAU);
+        game.particles.push({
+          x: b.x, y: b.y - b.h * 0.5,
+          vx: Math.cos(a) * rand(80, 220),
+          vy: Math.sin(a) * rand(80, 220),
+          life: 0.6, maxLife: 0.6,
+          color: '#80ffaa', size: 3,
+        });
+      }
+      ai.attackTimer = phase2 ? rand(2.5, 3.5) : rand(3.5, 5.0);
+    } else {
+      const n = phase2 ? 3 : 2;
+      for (let i = 0; i < n; i++) {
+        setTimeout(() => {
+          if (!game.running || b.dead) return;
+          const ang = Math.atan2(p.y - b.y, p.x - b.x) + (i - (n - 1) / 2) * 0.18;
+          const sp = 320;
+          game.projectiles.push({
+            kind: 'shadowBolt',
+            x: b.x, y: b.y - b.h * 0.5,
+            vx: Math.cos(ang) * sp,
+            vy: Math.sin(ang) * sp,
+            damage: 14,
+            life: 3.0,
+            friendly: false,
+            wobble: Math.random() * TAU,
+          });
+        }, i * 150);
+      }
+      ai.attackTimer = phase2 ? rand(1.8, 2.5) : rand(2.5, 3.5);
+    }
+  }
+  basicContact(b, p);
+  if (b.knockback > 0) {
+    b.x += b.knockbackDir * b.knockback * dt * 6;
+    b.knockback -= b.knockback * dt * 8 + 30 * dt;
+    if (b.knockback < 5) b.knockback = 0;
+  }
+}
+
+function updateGolem(b, p, dt) {
+  const ai = b.ai;
+  const dx = p.x - b.x, dy = p.y - b.y;
+  const d = Math.hypot(dx, dy) || 1;
+  if (ai.state === 'windup') {
+    ai.windupLeft -= dt;
+    // particles cracking the floor while charging
+    if (Math.random() < 0.5) {
+      game.particles.push({
+        x: b.x + rand(-25, 25), y: b.y,
+        vx: rand(-30, 30), vy: rand(-160, -60),
+        life: 0.5, maxLife: 0.5,
+        color: '#a89478', size: 2,
+      });
+    }
+    if (ai.windupLeft <= 0) {
+      const phase2 = b.hp < b.maxHp * 0.4;
+      const slamRadius = phase2 ? 240 : 200;
+      const dist = Math.hypot(p.x - b.x, p.y - b.y);
+      if (dist < slamRadius) damagePlayer(40);
+      for (let i = 0; i < 40; i++) {
+        const a = rand(0, TAU);
+        const sp2 = rand(160, 360);
+        game.particles.push({
+          x: b.x, y: b.y,
+          vx: Math.cos(a) * sp2, vy: Math.sin(a) * sp2 - 80,
+          life: 0.7, maxLife: 0.7,
+          color: i % 2 ? '#a89478' : '#5a4a3a',
+          size: 4,
+        });
+      }
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * TAU;
+        game.particles.push({
+          x: b.x + Math.cos(a) * 30, y: b.y,
+          vx: Math.cos(a) * 220, vy: Math.sin(a) * 60,
+          life: 0.6, maxLife: 0.6,
+          color: '#7a6a4a', size: 3,
+        });
+      }
+      game.shake = Math.max(game.shake, 30);
+      audio.hitBig();
+      ai.state = 'idle';
+      ai.attackTimer = rand(4.5, 6.5);
+    }
+    return;
+  }
+  if (b.knockback <= 0) {
+    b.x += (dx / d) * b.speed * dt;
+    b.y += (dy / d) * b.speed * dt * 0.5;
+    b.y = clamp(b.y, bandTop, bandBot);
+  }
+  b.walkPhase += dt * 5;
+  if (ai.attackTimer <= 0) {
+    const phase2 = b.hp < b.maxHp * 0.4;
+    if (Math.abs(p.x - b.x) < 200 && Math.random() < 0.5) {
+      ai.state = 'windup';
+      ai.windupLeft = 0.9;
+      b.flash = 0.1;
+    } else {
+      const n = phase2 ? 2 : 1;
+      for (let i = 0; i < n; i++) {
+        const ang = Math.atan2(p.y - b.y, p.x - b.x) + (i - (n - 1) / 2) * 0.18;
+        const sp = 280;
+        game.projectiles.push({
+          kind: 'rock',
+          x: b.x, y: b.y - b.h * 0.5,
+          vx: Math.cos(ang) * sp,
+          vy: Math.sin(ang) * sp,
+          damage: 22,
+          life: 2.0,
+          friendly: false,
+          spin: 0,
+          wobble: 0,
+        });
+      }
+      ai.attackTimer = rand(3.0, 4.5);
+    }
+  }
   basicContact(b, p);
   if (b.knockback > 0) {
     b.x += b.knockbackDir * b.knockback * dt * 4;
@@ -2245,6 +2471,8 @@ function drawEnemy(e) {
   else if (e.bossId === 'liche') drawLiche(e);
   else if (e.bossId === 'champion') drawChampion(e);
   else if (e.bossId === 'dragon') drawDragon(e);
+  else if (e.bossId === 'necromancer') drawNecromancer(e);
+  else if (e.bossId === 'golem') drawGolem(e);
 
   ctx.restore();
 
@@ -2261,7 +2489,8 @@ function drawEnemy(e) {
   }
 
   // Windup telegraph "!" above enemies about to use a skill
-  if (!dying && e.skillState === 'windup') {
+  const inWindup = e.skillState === 'windup' || (e.isBoss && e.ai && e.ai.state === 'windup');
+  if (!dying && inWindup) {
     const cy = y - e.h - 30;
     const scale = 1 + Math.sin(game.t * 14) * 0.18;
     ctx.save();
@@ -2901,6 +3130,197 @@ function drawDragon(b) {
   }
 }
 
+function drawNecromancer(b) {
+  const flash = b.flash > 0;
+  const t = game.t;
+  // Long flowing dark green robe
+  ctx.fillStyle = flash ? '#ffaaaa' : '#0a2418';
+  ctx.beginPath();
+  ctx.moveTo(-26, 0);
+  ctx.lineTo(-22, -b.h + 30);
+  ctx.lineTo(-18, -b.h + 18);
+  ctx.lineTo(18, -b.h + 18);
+  ctx.lineTo(22, -b.h + 30);
+  ctx.lineTo(26, 0);
+  ctx.closePath();
+  ctx.fill();
+  // Robe accent center
+  ctx.fillStyle = flash ? '#ffd0d0' : '#1a4830';
+  ctx.beginPath();
+  ctx.moveTo(-2, -b.h + 18);
+  ctx.lineTo(-6, 0);
+  ctx.lineTo(6, 0);
+  ctx.lineTo(2, -b.h + 18);
+  ctx.closePath();
+  ctx.fill();
+  // Skeletal arms
+  ctx.fillStyle = flash ? '#ffffff' : '#d8d0bc';
+  ctx.fillRect(-22, -b.h + 24, 4, 28);
+  ctx.fillRect(18, -b.h + 24, 4, 28);
+  // Skull held in left hand
+  ctx.fillStyle = flash ? '#ffffff' : '#e8e0c8';
+  ctx.beginPath();
+  ctx.arc(-22, -b.h + 56, 7, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#0a0a10';
+  ctx.fillRect(-25, -b.h + 54, 2, 2);
+  ctx.fillRect(-21, -b.h + 54, 2, 2);
+  // Staff (right side)
+  ctx.fillStyle = '#1a3010';
+  ctx.fillRect(20, -b.h + 14, 3, 70);
+  // Staff orb glow
+  const orbGlow = ctx.createRadialGradient(22, -b.h + 8, 1, 22, -b.h + 8, 18);
+  orbGlow.addColorStop(0, `rgba(120, 255, 170, ${0.7 + Math.sin(t * 5) * 0.2})`);
+  orbGlow.addColorStop(1, 'rgba(120, 255, 170, 0)');
+  ctx.fillStyle = orbGlow;
+  ctx.fillRect(8, -b.h - 8, 28, 32);
+  ctx.fillStyle = '#80ffaa';
+  ctx.beginPath();
+  ctx.arc(22, -b.h + 8, 6, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#d0ffe0';
+  ctx.beginPath();
+  ctx.arc(20, -b.h + 6, 2, 0, TAU);
+  ctx.fill();
+  // Hood
+  ctx.fillStyle = flash ? '#ffffff' : '#04140c';
+  ctx.beginPath();
+  ctx.moveTo(-16, -b.h + 24);
+  ctx.quadraticCurveTo(0, -b.h - 6, 16, -b.h + 24);
+  ctx.lineTo(10, -b.h + 32);
+  ctx.lineTo(-10, -b.h + 32);
+  ctx.closePath();
+  ctx.fill();
+  // Glowing green eyes
+  const glow = ctx.createRadialGradient(0, -b.h + 22, 1, 0, -b.h + 22, 18);
+  glow.addColorStop(0, `rgba(120, 255, 170, ${0.6 + Math.sin(t * 4) * 0.2})`);
+  glow.addColorStop(1, 'rgba(120, 255, 170, 0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(-18, -b.h + 12, 36, 18);
+  ctx.fillStyle = '#80ffaa';
+  ctx.fillRect(-6, -b.h + 22, 4, 3);
+  ctx.fillRect(2, -b.h + 22, 4, 3);
+  // Floating skulls around (lore decoration)
+  for (let i = 0; i < 3; i++) {
+    const a = t * 0.8 + i * (TAU / 3);
+    const ox = Math.cos(a) * 32;
+    const oy = -b.h * 0.3 + Math.sin(a) * 14;
+    ctx.fillStyle = `rgba(220, 220, 200, ${0.5 + Math.sin(a) * 0.2})`;
+    ctx.beginPath();
+    ctx.arc(ox, oy, 4, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.fillRect(ox - 2, oy - 1, 1, 1);
+    ctx.fillRect(ox + 1, oy - 1, 1, 1);
+  }
+}
+
+function drawGolem(b) {
+  const flash = b.flash > 0;
+  const t = game.t;
+  const walk = Math.sin(b.walkPhase) * 4;
+  // Heavy stone legs
+  ctx.fillStyle = flash ? '#ffaaaa' : '#3a2a18';
+  ctx.fillRect(-22, -36, 18, 36);
+  ctx.fillRect(4, -36, 18, 36 - Math.abs(walk));
+  // Belt of stone
+  ctx.fillStyle = flash ? '#ffd0d0' : '#5a4030';
+  ctx.fillRect(-30, -42, 60, 8);
+  // Body — massive stone
+  const grad = ctx.createLinearGradient(0, -b.h, 0, -36);
+  grad.addColorStop(0, flash ? '#ffffff' : '#7a6a4a');
+  grad.addColorStop(0.5, flash ? '#ffd0d0' : b.type.color);
+  grad.addColorStop(1, flash ? '#ffaaaa' : '#3a2818');
+  ctx.fillStyle = grad;
+  roundRect(-b.w/2 + 4, -b.h + 22, b.w - 8, b.h - 60, 10);
+  ctx.fill();
+  // Glowing core (yellow rune in chest)
+  const corePulse = 0.7 + Math.sin(t * 3) * 0.3;
+  const coreGlow = ctx.createRadialGradient(0, -b.h * 0.5, 1, 0, -b.h * 0.5, 28);
+  coreGlow.addColorStop(0, `rgba(255, 200, 80, ${corePulse})`);
+  coreGlow.addColorStop(1, 'rgba(255, 200, 80, 0)');
+  ctx.fillStyle = coreGlow;
+  ctx.fillRect(-30, -b.h * 0.5 - 28, 60, 56);
+  ctx.fillStyle = `rgba(255, 230, 100, ${corePulse})`;
+  // Diamond rune
+  ctx.beginPath();
+  ctx.moveTo(0, -b.h * 0.5 - 10);
+  ctx.lineTo(8, -b.h * 0.5);
+  ctx.lineTo(0, -b.h * 0.5 + 10);
+  ctx.lineTo(-8, -b.h * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  // Cracks across body (with subtle glow)
+  ctx.strokeStyle = `rgba(255, 200, 80, ${corePulse * 0.5})`;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-20, -b.h + 30);
+  ctx.lineTo(-10, -b.h * 0.5);
+  ctx.lineTo(-16, -b.h * 0.4);
+  ctx.moveTo(18, -b.h + 30);
+  ctx.lineTo(8, -b.h * 0.5);
+  ctx.lineTo(14, -b.h * 0.3);
+  ctx.stroke();
+  // Massive shoulders/pauldrons
+  ctx.fillStyle = flash ? '#ffaaaa' : '#3a2818';
+  ctx.beginPath();
+  ctx.arc(-b.w/2 + 4, -b.h + 30, 18, 0, TAU);
+  ctx.arc(b.w/2 - 4, -b.h + 30, 18, 0, TAU);
+  ctx.fill();
+  // Rocky chunks on shoulders
+  ctx.fillStyle = '#5a4830';
+  for (const side of [-1, 1]) {
+    for (let i = -1; i <= 1; i++) {
+      const sx = side * (b.w/2 - 4) + i * 8;
+      ctx.beginPath();
+      ctx.moveTo(sx - 4, -b.h + 18);
+      ctx.lineTo(sx, -b.h + 8);
+      ctx.lineTo(sx + 4, -b.h + 18);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  // Massive arms
+  ctx.fillStyle = flash ? '#ffaaaa' : '#5a4030';
+  ctx.fillRect(-b.w/2 - 4, -b.h + 40, 14, 38);
+  ctx.fillRect(b.w/2 - 10, -b.h + 40, 14, 38);
+  // Stone fists
+  ctx.fillStyle = flash ? '#ffffff' : '#6a5040';
+  ctx.beginPath();
+  ctx.arc(-b.w/2 + 3, -b.h + 80, 12, 0, TAU);
+  ctx.arc(b.w/2 - 3, -b.h + 80, 12, 0, TAU);
+  ctx.fill();
+  // Knuckles
+  ctx.fillStyle = '#3a2818';
+  for (const side of [-1, 1]) {
+    for (let i = -1; i <= 1; i++) {
+      ctx.fillRect(side * (b.w/2 - 3) + i * 4 - 1, -b.h + 76, 2, 4);
+    }
+  }
+  // Head (smaller, blocky)
+  ctx.fillStyle = flash ? '#ffffff' : '#5a4030';
+  roundRect(-14, -b.h + 4, 28, 28, 4);
+  ctx.fill();
+  // Glowing eyes
+  const eyeGlow = ctx.createRadialGradient(0, -b.h + 14, 1, 0, -b.h + 14, 20);
+  eyeGlow.addColorStop(0, `rgba(255, 200, 80, ${corePulse * 0.6})`);
+  eyeGlow.addColorStop(1, 'rgba(255, 200, 80, 0)');
+  ctx.fillStyle = eyeGlow;
+  ctx.fillRect(-20, -b.h + 4, 40, 22);
+  ctx.fillStyle = '#ffe080';
+  ctx.fillRect(-7, -b.h + 12, 5, 4);
+  ctx.fillRect(2, -b.h + 12, 5, 4);
+  // Crown of rock spikes
+  ctx.fillStyle = flash ? '#ffd0d0' : '#3a2818';
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * 6 - 2, -b.h + 4);
+    ctx.lineTo(i * 6, -b.h - 8);
+    ctx.lineTo(i * 6 + 2, -b.h + 4);
+    ctx.fill();
+  }
+}
+
 // ============ Coin ============
 function drawCoin(c) {
   const x = sX(c.x), y = c.y;
@@ -3017,6 +3437,38 @@ function drawProjectiles() {
       ctx.beginPath();
       ctx.arc(x, y, r * 0.5, 0, TAU);
       ctx.fill();
+    } else if (pr.kind === 'rock') {
+      pr.spin += 0.15;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(pr.spin);
+      // Rock shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.beginPath(); ctx.arc(2, 2, 14, 0, TAU); ctx.fill();
+      // Rock body (irregular)
+      const grad = ctx.createRadialGradient(-3, -3, 1, 0, 0, 16);
+      grad.addColorStop(0, '#a89478');
+      grad.addColorStop(1, '#3a2818');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(-12, -8);
+      ctx.lineTo(-4, -14);
+      ctx.lineTo(8, -12);
+      ctx.lineTo(14, -2);
+      ctx.lineTo(10, 10);
+      ctx.lineTo(-2, 14);
+      ctx.lineTo(-12, 8);
+      ctx.closePath();
+      ctx.fill();
+      // Cracks
+      ctx.strokeStyle = '#1a0a04';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-6, -4);
+      ctx.lineTo(2, 0);
+      ctx.lineTo(6, 6);
+      ctx.stroke();
+      ctx.restore();
     } else if (pr.kind === 'goblinDagger') {
       pr.spin += 0.4;
       ctx.save();
@@ -3098,9 +3550,14 @@ function startGame() {
   overlay.classList.remove('visible');
   shopModal.classList.remove('visible');
   pauseModal.classList.remove('visible');
+  forgeModal.classList.remove('visible');
   bossBar.classList.remove('visible');
   game.challengeMode = challengeInput.checked;
   game.pauseFromMenu = false;
+  // Apply persistent forge equipment
+  const eq = loadForge();
+  game.equipment = eq;
+  game.equipDR = ARMOR_DR[eq.armor];
   bossIntro.classList.remove('visible');
   stageToast.classList.remove('visible');
   game.running = true;
@@ -3124,12 +3581,18 @@ function startGame() {
   game.bossesDefeated = 0;
   game.unlockedWeapons = new Set(['sword', 'bow', 'hammer']);
   game.upgrades = {
-    damageMul: 1,
+    damageMul: RING_DMG[game.equipment.ring] || 1,
     speedMul: 1,
     weaponBonus: { sword: 1, bow: 1, hammer: 1, dagger: 1, spear: 1, magicSword: 1 },
     purchased: new Set(),
     stacks: {},
   };
+  // Apply helmet HP bonus
+  const helmHp = HELM_HP[game.equipment.helmet] || 0;
+  if (helmHp > 0) {
+    game.player.maxHp += helmHp;
+    game.player.hp = game.player.maxHp;
+  }
   killsEl.textContent = '☠ 0';
   coinsEl.textContent = '⛁ 0';
   stageEl.textContent = 'Étage 1';
@@ -3155,20 +3618,85 @@ function gameOver() {
   const best = updateBestRun(current);
   const isNewRecord = current.stage > prevBest.stage
     || (current.stage === prevBest.stage && current.distance > prevBest.distance);
+  const essenceGain = gainEssences(current.coins);
   overlay.querySelector('h1').textContent = isNewRecord ? 'Nouveau record !' : 'Tu es tombé';
   overlay.querySelector('.subtitle').innerHTML =
     `Étage ${current.stage} · ${current.distance} m · ${current.kills} kills · ${current.coins} ⛁`
+    + (essenceGain > 0 ? `<br><span style="font-size:13px;color:#c0e0ff;">+${essenceGain} ⛧ essences pour la Forge</span>` : '')
     + `<br><span style="font-size:11px;opacity:0.7;letter-spacing:2px;">Record : étage ${best.stage} · ${best.distance} m · ${best.bossesDefeated} boss</span>`;
   startBtn.textContent = 'Recommencer';
   overlay.classList.add('visible');
+  refreshStartOverlay();
 }
 
 function refreshStartOverlay() {
   const best = loadBestRun();
+  const f = loadForge();
+  essenceCountEl.textContent = f.essences;
   if (best.stage > 0) {
     overlay.querySelector('.subtitle').innerHTML =
       `Avance dans les ténèbres<br><span style="font-size:11px;opacity:0.7;letter-spacing:2px;">Record : étage ${best.stage} · ${best.distance} m · ${best.bossesDefeated} boss</span>`;
   }
+}
+
+// ============ Forge UI ============
+function openForge() {
+  renderForge();
+  forgeModal.classList.add('visible');
+}
+function closeForge() {
+  forgeModal.classList.remove('visible');
+  refreshStartOverlay();
+}
+
+function renderForge() {
+  const f = loadForge();
+  forgeEssenceEl.textContent = '⛧ ' + f.essences;
+  forgeList.innerHTML = '';
+  let lastSlot = null;
+  for (const item of FORGE_TIERS) {
+    if (item.slot !== lastSlot) {
+      const header = document.createElement('div');
+      header.className = 'forge-slot-header';
+      header.textContent = SLOT_LABELS[item.slot];
+      forgeList.appendChild(header);
+      lastSlot = item.slot;
+    }
+    const owned = f[item.slot] >= item.tier;
+    const requiredPrev = item.tier - 1;
+    const locked = !owned && f[item.slot] < requiredPrev;
+    const card = document.createElement('div');
+    card.className = 'shop-item forge-item';
+    if (owned) card.classList.add('owned');
+    else if (locked) card.classList.add('locked', 'disabled');
+    else if (f.essences < item.cost) card.classList.add('disabled');
+    const tierTag = owned ? '<span class="forge-tag owned-tag">Équipé</span>' : `<span class="forge-tag tier-${item.tier}">T${item.tier}</span>`;
+    card.innerHTML = `
+      <div class="shop-icon">${item.icon}</div>
+      <div class="shop-info">
+        <div class="shop-name">${item.name} ${tierTag}</div>
+        <div class="shop-desc">${item.desc}${locked ? ` · Nécessite tier ${requiredPrev}` : ''}</div>
+      </div>
+      <div class="shop-price">${owned ? '✓' : `⛧ ${item.cost}`}</div>
+    `;
+    if (!owned && !locked) {
+      card.addEventListener('click', () => buyForgeItem(item));
+    }
+    forgeList.appendChild(card);
+  }
+}
+
+function buyForgeItem(item) {
+  const f = loadForge();
+  if (f[item.slot] >= item.tier) return;
+  if (f[item.slot] < item.tier - 1) return;
+  if (f.essences < item.cost) return;
+  f.essences -= item.cost;
+  f[item.slot] = item.tier;
+  saveForge(f);
+  audio.purchase();
+  renderForge();
+  essenceCountEl.textContent = f.essences;
 }
 
 // ============ Pause / Mute / Challenge ============
@@ -3250,6 +3778,8 @@ window.addEventListener('keydown', e => {
   }
 });
 
+forgeBtn.addEventListener('click', () => { audio.ensure(); audio.click(); openForge(); });
+forgeClose.addEventListener('click', () => { audio.click(); closeForge(); });
 startBtn.addEventListener('click', () => { audio.ensure(); startGame(); });
 refreshStartOverlay();
 updateWeaponUI();

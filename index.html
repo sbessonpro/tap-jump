@@ -98,6 +98,20 @@
         <span class="label">Mode Challenge — pas d'auto-scroll, ×1.5 pièces</span>
       </label>
       <button id="start-btn">Entrer dans le donjon</button>
+      <button id="forge-btn" class="secondary-btn">⚒ Forge ancestrale (<span id="essence-count">0</span> ⛧)</button>
+    </div>
+
+    <!-- Forge modal -->
+    <div id="forge-modal">
+      <div class="shop-panel">
+        <div class="shop-header">
+          <h2>⚒ Forge ancestrale</h2>
+          <div id="forge-essence">⛧ 0</div>
+          <button id="forge-close">✕</button>
+        </div>
+        <p class="forge-help">Améliore ton équipement entre les runs. Les essences proviennent des pièces collectées (1 essence par 30 pièces).</p>
+        <div id="forge-list"></div>
+      </div>
     </div>
   </div>
   <script src="game.js"></script>
