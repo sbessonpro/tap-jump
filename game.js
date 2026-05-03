@@ -380,6 +380,8 @@ const game = {
   embers: [],
   damageNums: [],
   pickups: [],
+  props: [],
+  lastPropX: 0,
   cameraX: 0,
   spawnTimer: 0,
   kills: 0,
@@ -945,17 +947,12 @@ function onBossDefeated(boss) {
   // Next boss further away
   game.bossNextAt = Math.floor(game.cameraX / 50) + 250;
   bossBar.classList.remove('visible');
-  stageEl.textContent = 'Étage ' + game.stage;
+  const biome = getBiome();
+  stageEl.textContent = `Étage ${game.stage} · ${biome.name}`;
 
   // Stage toast
-  stageToastTitle.textContent = 'Étage ' + game.stage;
-  const subs = [
-    'Le donjon s\'enfonce...',
-    'Les ténèbres s\'épaississent...',
-    'L\'écho des morts résonne...',
-    'Quelque chose pire approche...',
-  ];
-  stageToastSub.textContent = subs[(game.stage - 2) % subs.length] || subs[0];
+  stageToastTitle.textContent = `Étage ${game.stage} — ${biome.name}`;
+  stageToastSub.textContent = biome.sub;
   stageToast.classList.remove('visible');
   void stageToast.offsetWidth;
   stageToast.classList.add('visible');
@@ -1976,6 +1973,8 @@ function update(dt) {
 
   updatePickups(dt);
   updateEmbers(dt);
+  maybeSpawnProp();
+  updateProps();
 
   if (game.shake > 0) game.shake = Math.max(0, game.shake - dt * 40);
 }
@@ -2003,6 +2002,7 @@ function render(dt) {
   drawBackground(dt);
   drawEmbers();
   drawGround();
+  drawProps();
 
   if (game.player) {
     const all = [];
@@ -2021,12 +2021,114 @@ function render(dt) {
   ctx.restore();
 }
 
+// ============ Biomes ============
+const BIOMES = [
+  {
+    id: 'dungeon', name: 'Donjon', sub: 'Le donjon s\'enfonce...',
+    skyTop: '#06060c', skyBot: '#0a0a14',
+    floorTop: '#1a1a24', floorBot: '#0a0a10',
+    pillar: ['#15151f', '#26262e', '#15151f'],
+    pillarCap: '#1c1c26',
+    crackColor: 'rgba(60, 50, 70, 0.35)',
+    floorPattern: 'cobble',
+    floorTint: 'rgba(255,255,255,0.04)',
+    edgeColor: 'rgba(120, 80, 60, 0.4)',
+    torchFlame: ['rgba(255, 230, 120, ', 'rgba(255, 140, 40, ', 'rgba(180, 40, 0, 0)'],
+    torchCore: 'rgba(255, 240, 180, ',
+    emberColor: 'rgba(255, 130, 50, ',
+    propTypes: ['skull', 'crackedSlab'],
+    fogTint: null,
+    ceilingType: 'arches',
+  },
+  {
+    id: 'crypts', name: 'Cryptes', sub: 'Les cryptes s\'ouvrent...',
+    skyTop: '#04100a', skyBot: '#0a1810',
+    floorTop: '#1a2418', floorBot: '#0a120a',
+    pillar: ['#0a1a14', '#1a3022', '#0a1a14'],
+    pillarCap: '#102018',
+    crackColor: 'rgba(80, 160, 100, 0.25)',
+    floorPattern: 'crackedStone',
+    floorTint: 'rgba(140, 220, 140, 0.05)',
+    edgeColor: 'rgba(100, 180, 100, 0.4)',
+    torchFlame: ['rgba(140, 255, 160, ', 'rgba(60, 200, 90, ', 'rgba(20, 100, 40, 0)'],
+    torchCore: 'rgba(200, 255, 220, ',
+    emberColor: 'rgba(80, 220, 120, ',
+    propTypes: ['coffin', 'bones', 'skull'],
+    fogTint: 'rgba(60, 200, 100, 0.04)',
+    ceilingType: 'chains',
+  },
+  {
+    id: 'caves', name: 'Cavernes Souterraines', sub: 'L\'écho des profondeurs...',
+    skyTop: '#06080e', skyBot: '#0c1018',
+    floorTop: '#1a1c28', floorBot: '#08080f',
+    pillar: ['#1a2028', '#2a3040', '#1a2028'],
+    pillarCap: '#202632',
+    crackColor: 'rgba(120, 160, 220, 0.25)',
+    floorPattern: 'rough',
+    floorTint: 'rgba(120, 180, 220, 0.04)',
+    edgeColor: 'rgba(100, 140, 180, 0.4)',
+    torchFlame: ['rgba(140, 200, 255, ', 'rgba(60, 130, 220, ', 'rgba(20, 60, 140, 0)'],
+    torchCore: 'rgba(220, 240, 255, ',
+    emberColor: 'rgba(120, 180, 240, ',
+    propTypes: ['stalagmite', 'mushroom', 'puddle'],
+    fogTint: 'rgba(80, 140, 220, 0.05)',
+    ceilingType: 'stalactites',
+  },
+  {
+    id: 'library', name: 'Bibliothèque Hantée', sub: 'Les pages murmurent...',
+    skyTop: '#0c0814', skyBot: '#150a20',
+    floorTop: '#1c1428', floorBot: '#0c0612',
+    pillar: ['#1a1428', '#2a1a3a', '#1a1428'],
+    pillarCap: '#22182e',
+    crackColor: 'rgba(180, 100, 220, 0.30)',
+    floorPattern: 'planks',
+    floorTint: 'rgba(180, 120, 220, 0.04)',
+    edgeColor: 'rgba(140, 80, 180, 0.5)',
+    torchFlame: ['rgba(220, 140, 255, ', 'rgba(140, 60, 220, ', 'rgba(70, 20, 130, 0)'],
+    torchCore: 'rgba(240, 200, 255, ',
+    emberColor: 'rgba(180, 120, 220, ',
+    propTypes: ['bookshelf', 'candle', 'book'],
+    fogTint: 'rgba(140, 80, 200, 0.05)',
+    ceilingType: 'books',
+  },
+  {
+    id: 'forge', name: 'Forge Oubliée', sub: 'Les forges s\'embrasent...',
+    skyTop: '#180806', skyBot: '#241008',
+    floorTop: '#2a1408', floorBot: '#0a0606',
+    pillar: ['#1a0808', '#3a1810', '#1a0808'],
+    pillarCap: '#221008',
+    crackColor: 'rgba(255, 100, 30, 0.4)',
+    floorPattern: 'magma',
+    floorTint: 'rgba(255, 120, 40, 0.06)',
+    edgeColor: 'rgba(200, 80, 30, 0.6)',
+    torchFlame: ['rgba(255, 200, 80, ', 'rgba(255, 90, 30, ', 'rgba(160, 30, 0, 0)'],
+    torchCore: 'rgba(255, 240, 200, ',
+    emberColor: 'rgba(255, 120, 40, ',
+    propTypes: ['anvil', 'magmaCrack', 'forgeBlock'],
+    fogTint: 'rgba(255, 100, 40, 0.06)',
+    ceilingType: 'magma',
+  },
+];
+
+function getBiome() {
+  const idx = (game.stage - 1) % BIOMES.length;
+  return BIOMES[idx];
+}
+
 // ============ Background ============
 function drawBackground(dt) {
-  ctx.fillStyle = '#0a0a14';
+  const biome = getBiome();
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, bandTop);
+  skyGrad.addColorStop(0, biome.skyTop);
+  skyGrad.addColorStop(1, biome.skyBot);
+  ctx.fillStyle = skyGrad;
   ctx.fillRect(0, 0, W, bandTop);
 
-  ctx.strokeStyle = 'rgba(60, 50, 70, 0.35)';
+  // Ceiling decoration per biome
+  drawCeiling(biome);
+
+  // Background cracks
+  ctx.strokeStyle = biome.crackColor;
   ctx.lineWidth = 1;
   const farOff = (game.cameraX * 0.2) % 240;
   for (let i = -1; i < W / 240 + 1; i++) {
@@ -2038,71 +2140,229 @@ function drawBackground(dt) {
     ctx.stroke();
   }
 
+  // Pillars
   const midOff = (game.cameraX * 0.5) % 360;
   for (let i = -1; i < W / 360 + 2; i++) {
     const x = i * 360 - midOff;
-    drawPillar(x, bandTop - 50);
+    drawPillar(x, bandTop - 50, biome);
   }
 
+  // Wall torches
   const torchOff = (game.cameraX * 0.6) % 480;
   for (let i = -1; i < W / 480 + 2; i++) {
     const x = i * 480 + 240 - torchOff;
-    drawWallTorch(x, bandTop * 0.45);
+    drawWallTorch(x, bandTop * 0.45, biome);
+  }
+
+  // Biome fog tint over the upper half (subtle)
+  if (biome.fogTint) {
+    ctx.fillStyle = biome.fogTint;
+    ctx.fillRect(0, 0, W, bandTop);
   }
 }
 
-function drawPillar(x, baseY) {
+function drawCeiling(biome) {
+  if (biome.ceilingType === 'stalactites') {
+    const off = (game.cameraX * 0.4) % 60;
+    ctx.fillStyle = '#1a2028';
+    for (let i = -1; i < W / 60 + 1; i++) {
+      const x = i * 60 - off;
+      const h = 14 + (i * 17 % 20);
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + 8, h);
+      ctx.lineTo(x + 16, 0);
+      ctx.fill();
+    }
+  } else if (biome.ceilingType === 'chains') {
+    const off = (game.cameraX * 0.4) % 110;
+    ctx.strokeStyle = 'rgba(60, 80, 60, 0.6)';
+    ctx.lineWidth = 1.5;
+    for (let i = -1; i < W / 110 + 1; i++) {
+      const x = i * 110 - off;
+      const len = 30 + (i * 23 % 40);
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, len);
+      ctx.stroke();
+      // tiny bone hanging
+      ctx.fillStyle = '#c8c0a8';
+      ctx.fillRect(x - 3, len, 6, 2);
+    }
+  } else if (biome.ceilingType === 'books') {
+    const off = (game.cameraX * 0.45) % 140;
+    for (let i = -1; i < W / 140 + 1; i++) {
+      const x = i * 140 - off;
+      // bookshelf strip
+      ctx.fillStyle = '#2a1840';
+      ctx.fillRect(x, 0, 100, 24);
+      ctx.fillStyle = '#4a2858';
+      // book spines
+      const colors = ['#6a2a3a', '#3a2a5a', '#5a3a2a', '#3a2a4a'];
+      for (let j = 0; j < 8; j++) {
+        ctx.fillStyle = colors[j % colors.length];
+        ctx.fillRect(x + 4 + j * 12, 4, 10, 16);
+      }
+    }
+  } else if (biome.ceilingType === 'magma') {
+    const off = (game.cameraX * 0.3) % 200;
+    ctx.strokeStyle = 'rgba(255, 100, 40, 0.5)';
+    ctx.lineWidth = 2;
+    for (let i = -1; i < W / 200 + 1; i++) {
+      const x = i * 200 - off;
+      ctx.beginPath();
+      ctx.moveTo(x, 8);
+      ctx.lineTo(x + 60, 18);
+      ctx.lineTo(x + 100, 12);
+      ctx.lineTo(x + 160, 22);
+      ctx.stroke();
+    }
+    // glow
+    ctx.fillStyle = 'rgba(255, 80, 30, 0.08)';
+    ctx.fillRect(0, 0, W, 30);
+  }
+}
+
+function drawPillar(x, baseY, biome) {
   const grad = ctx.createLinearGradient(x, 0, x + 50, 0);
-  grad.addColorStop(0, '#15151f');
-  grad.addColorStop(0.5, '#26262e');
-  grad.addColorStop(1, '#15151f');
+  grad.addColorStop(0, biome.pillar[0]);
+  grad.addColorStop(0.5, biome.pillar[1]);
+  grad.addColorStop(1, biome.pillar[2]);
   ctx.fillStyle = grad;
   ctx.fillRect(x, 30, 50, baseY - 30);
-  ctx.fillStyle = '#1c1c26';
+  ctx.fillStyle = biome.pillarCap;
   ctx.fillRect(x - 4, 30, 58, 14);
   ctx.fillRect(x - 4, baseY - 14, 58, 14);
-  ctx.strokeStyle = 'rgba(80, 60, 80, 0.4)';
+  ctx.strokeStyle = biome.crackColor;
   ctx.beginPath();
   ctx.moveTo(x + 25, 50);
   ctx.lineTo(x + 22, baseY - 30);
   ctx.stroke();
+  // Forge biome: glowing magma vein on pillar
+  if (biome.id === 'forge') {
+    const pulse = 0.5 + Math.sin(game.t * 3 + x * 0.05) * 0.3;
+    ctx.fillStyle = `rgba(255, 100, 40, ${pulse})`;
+    ctx.fillRect(x + 20, 60, 3, baseY - 80);
+  }
+  // Library biome: glowing rune on pillar
+  if (biome.id === 'library') {
+    const pulse = 0.4 + Math.sin(game.t * 2 + x * 0.05) * 0.25;
+    ctx.fillStyle = `rgba(180, 120, 220, ${pulse})`;
+    ctx.fillRect(x + 22, 80 + Math.sin(x * 0.01) * 30, 6, 6);
+  }
 }
 
-function drawWallTorch(x, y) {
+function drawWallTorch(x, y, biome) {
   const flicker = Math.sin(game.t * 12 + x) * 0.2 + 0.8;
   ctx.fillStyle = '#3a2a1a';
   ctx.fillRect(x - 3, y, 6, 14);
   const grad = ctx.createRadialGradient(x, y - 6, 1, x, y - 6, 22);
-  grad.addColorStop(0, `rgba(255, 230, 120, ${flicker})`);
-  grad.addColorStop(0.4, `rgba(255, 140, 40, ${flicker * 0.8})`);
-  grad.addColorStop(1, 'rgba(180, 40, 0, 0)');
+  grad.addColorStop(0, biome.torchFlame[0] + flicker + ')');
+  grad.addColorStop(0.4, biome.torchFlame[1] + (flicker * 0.8) + ')');
+  grad.addColorStop(1, biome.torchFlame[2]);
   ctx.fillStyle = grad;
   ctx.beginPath();
   ctx.arc(x, y - 6, 22, 0, TAU);
   ctx.fill();
-  ctx.fillStyle = `rgba(255, 240, 180, ${flicker})`;
+  ctx.fillStyle = biome.torchCore + flicker + ')';
   ctx.beginPath();
   ctx.ellipse(x, y - 6, 3, 6, 0, 0, TAU);
   ctx.fill();
 }
 
 function drawGround() {
+  const biome = getBiome();
   const grad = ctx.createLinearGradient(0, bandTop, 0, H);
-  grad.addColorStop(0, '#1a1a24');
-  grad.addColorStop(1, '#0a0a10');
+  grad.addColorStop(0, biome.floorTop);
+  grad.addColorStop(1, biome.floorBot);
   ctx.fillStyle = grad;
   ctx.fillRect(0, bandTop, W, H - bandTop);
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
   ctx.lineWidth = 1;
-  const off = game.cameraX % 80;
-  for (let i = -1; i < W / 80 + 1; i++) {
-    const x = i * 80 - off;
-    ctx.beginPath();
-    ctx.moveTo(x, bandTop);
-    ctx.lineTo(x - 30, H);
-    ctx.stroke();
+
+  if (biome.floorPattern === 'cobble') {
+    ctx.strokeStyle = biome.floorTint;
+    const off = game.cameraX % 80;
+    for (let i = -1; i < W / 80 + 1; i++) {
+      const x = i * 80 - off;
+      ctx.beginPath();
+      ctx.moveTo(x, bandTop);
+      ctx.lineTo(x - 30, H);
+      ctx.stroke();
+    }
+  } else if (biome.floorPattern === 'crackedStone') {
+    ctx.strokeStyle = biome.floorTint;
+    const off = game.cameraX % 100;
+    for (let i = -1; i < W / 100 + 2; i++) {
+      const x = i * 100 - off;
+      ctx.beginPath();
+      ctx.moveTo(x, bandTop + 20);
+      ctx.lineTo(x + 30, bandTop + 40);
+      ctx.lineTo(x + 10, bandTop + 70);
+      ctx.stroke();
+    }
+    // moss tufts
+    ctx.fillStyle = 'rgba(80, 160, 80, 0.25)';
+    const off2 = game.cameraX % 200;
+    for (let i = -1; i < W / 200 + 1; i++) {
+      const x = i * 200 - off2 + 60;
+      ctx.fillRect(x, bandTop + 10, 12, 3);
+    }
+  } else if (biome.floorPattern === 'rough') {
+    ctx.strokeStyle = biome.floorTint;
+    const off = game.cameraX % 60;
+    for (let i = -1; i < W / 60 + 1; i++) {
+      const x = i * 60 - off;
+      ctx.beginPath();
+      ctx.arc(x, bandTop + 40 + (i % 3) * 8, 14, 0, Math.PI);
+      ctx.stroke();
+    }
+  } else if (biome.floorPattern === 'planks') {
+    ctx.strokeStyle = biome.floorTint;
+    for (let y = bandTop + 20; y < H; y += 24) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+    }
+    // vertical seams
+    const off = game.cameraX % 90;
+    ctx.strokeStyle = 'rgba(80, 50, 30, 0.3)';
+    for (let i = -1; i < W / 90 + 1; i++) {
+      const x = i * 90 - off;
+      const yLine = bandTop + 20 + (i % 3) * 24;
+      ctx.beginPath();
+      ctx.moveTo(x, yLine);
+      ctx.lineTo(x, yLine + 24);
+      ctx.stroke();
+    }
+  } else if (biome.floorPattern === 'magma') {
+    ctx.strokeStyle = biome.floorTint;
+    const off = game.cameraX % 80;
+    for (let i = -1; i < W / 80 + 1; i++) {
+      const x = i * 80 - off;
+      ctx.beginPath();
+      ctx.moveTo(x, bandTop);
+      ctx.lineTo(x - 30, H);
+      ctx.stroke();
+    }
+    // glowing magma cracks
+    const off2 = game.cameraX % 280;
+    const pulse = 0.5 + Math.sin(game.t * 2.5) * 0.25;
+    ctx.strokeStyle = `rgba(255, 100, 40, ${pulse})`;
+    ctx.lineWidth = 2;
+    for (let i = -1; i < W / 280 + 1; i++) {
+      const x = i * 280 - off2;
+      const y = bandTop + 30 + (i % 4) * 20;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 60, y + 14);
+      ctx.lineTo(x + 130, y + 6);
+      ctx.lineTo(x + 200, y + 22);
+      ctx.stroke();
+    }
   }
-  ctx.strokeStyle = 'rgba(120, 80, 60, 0.4)';
+
+  ctx.strokeStyle = biome.edgeColor;
   ctx.beginPath();
   ctx.moveTo(0, bandTop);
   ctx.lineTo(W, bandTop);
@@ -2110,12 +2370,229 @@ function drawGround() {
 }
 
 function drawEmbers() {
+  const biome = getBiome();
+  const colorPrefix = biome.emberColor;
   for (const em of game.embers) {
     const a = clamp(em.life / em.maxLife, 0, 1);
-    ctx.fillStyle = `rgba(255, 130, 50, ${a * 0.7})`;
+    ctx.fillStyle = colorPrefix + (a * 0.7) + ')';
     ctx.beginPath();
     ctx.arc(sX(em.x), em.y, em.size, 0, TAU);
     ctx.fill();
+  }
+}
+
+// ============ Props (decorative scenery) ============
+function maybeSpawnProp() {
+  if (!game.lastPropX) game.lastPropX = -200;
+  const target = game.lastPropX + rand(120, 260);
+  if (game.cameraX < target) return;
+  game.lastPropX = game.cameraX;
+  const biome = getBiome();
+  const type = biome.propTypes[Math.floor(Math.random() * biome.propTypes.length)];
+  const x = game.cameraX + W + 40 + rand(0, 60);
+  // anchor on or near the floor
+  const y = rand(bandTop + 25, bandBot + 5);
+  game.props.push({ type, x, y, seed: Math.random() });
+}
+
+function updateProps() {
+  game.props = game.props.filter(pr => pr.x > game.cameraX - 200);
+}
+
+function drawProps() {
+  for (const pr of game.props) {
+    const x = sX(pr.x);
+    const y = pr.y;
+    drawProp(pr, x, y);
+  }
+}
+
+function drawProp(pr, x, y) {
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + 2, 12, 3, 0, 0, TAU);
+  ctx.fill();
+
+  if (pr.type === 'skull') {
+    ctx.fillStyle = '#c8c0a8';
+    ctx.beginPath();
+    ctx.arc(x, y - 5, 6, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#a89870';
+    ctx.fillRect(x - 4, y - 1, 8, 2);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(x - 3, y - 6, 2, 2);
+    ctx.fillRect(x + 1, y - 6, 2, 2);
+  } else if (pr.type === 'crackedSlab') {
+    ctx.fillStyle = '#1a1a26';
+    ctx.fillRect(x - 14, y - 4, 28, 6);
+    ctx.strokeStyle = 'rgba(80, 60, 80, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x - 8, y - 4);
+    ctx.lineTo(x - 4, y);
+    ctx.lineTo(x + 4, y - 2);
+    ctx.stroke();
+  } else if (pr.type === 'coffin') {
+    ctx.fillStyle = '#3a2818';
+    // Diamond-ish coffin viewed from above (top-down side perspective)
+    ctx.beginPath();
+    ctx.moveTo(x - 18, y - 4);
+    ctx.lineTo(x - 14, y - 12);
+    ctx.lineTo(x + 14, y - 12);
+    ctx.lineTo(x + 18, y - 4);
+    ctx.lineTo(x + 14, y + 4);
+    ctx.lineTo(x - 14, y + 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#5a3818';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // cross
+    ctx.fillStyle = '#a08858';
+    ctx.fillRect(x - 1, y - 9, 2, 8);
+    ctx.fillRect(x - 3, y - 7, 6, 2);
+  } else if (pr.type === 'bones') {
+    ctx.fillStyle = '#c8c0a8';
+    // long bone
+    ctx.fillRect(x - 8, y - 2, 14, 2);
+    ctx.beginPath();
+    ctx.arc(x - 9, y - 1, 2, 0, TAU);
+    ctx.arc(x + 7, y - 1, 2, 0, TAU);
+    ctx.fill();
+    // short bone
+    ctx.fillRect(x - 4, y, 10, 1);
+  } else if (pr.type === 'stalagmite') {
+    ctx.fillStyle = '#3a4458';
+    ctx.beginPath();
+    ctx.moveTo(x - 8, y);
+    ctx.lineTo(x, y - 24);
+    ctx.lineTo(x + 8, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#5a6478';
+    ctx.beginPath();
+    ctx.moveTo(x - 4, y);
+    ctx.lineTo(x, y - 24);
+    ctx.lineTo(x - 1, y);
+    ctx.closePath();
+    ctx.fill();
+  } else if (pr.type === 'mushroom') {
+    // stem
+    ctx.fillStyle = '#d8d0c0';
+    ctx.fillRect(x - 2, y - 10, 4, 10);
+    // cap
+    const capColor = pr.seed < 0.5 ? '#b03040' : '#3060a0';
+    ctx.fillStyle = capColor;
+    ctx.beginPath();
+    ctx.arc(x, y - 10, 7, Math.PI, TAU);
+    ctx.fill();
+    // spots
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(x - 4, y - 12, 2, 2);
+    ctx.fillRect(x + 1, y - 14, 2, 2);
+    // glow
+    const glow = ctx.createRadialGradient(x, y - 10, 1, x, y - 10, 18);
+    glow.addColorStop(0, capColor === '#b03040' ? 'rgba(220,80,100,0.25)' : 'rgba(80,160,255,0.25)');
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(x - 18, y - 28, 36, 30);
+  } else if (pr.type === 'puddle') {
+    ctx.fillStyle = 'rgba(80, 140, 200, 0.5)';
+    ctx.beginPath();
+    ctx.ellipse(x, y, 18, 5, 0, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(180, 220, 255, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(x, y - 1, 14, 3, 0, 0, TAU);
+    ctx.stroke();
+  } else if (pr.type === 'bookshelf') {
+    ctx.fillStyle = '#2a1830';
+    ctx.fillRect(x - 14, y - 32, 28, 32);
+    // shelves
+    ctx.fillStyle = '#1a0820';
+    ctx.fillRect(x - 14, y - 22, 28, 1);
+    ctx.fillRect(x - 14, y - 12, 28, 1);
+    // books
+    const colors = ['#6a2a3a', '#3a2a5a', '#5a3a2a', '#3a2a4a', '#7a4040', '#2a3a5a'];
+    for (let row = 0; row < 3; row++) {
+      for (let i = 0; i < 5; i++) {
+        ctx.fillStyle = colors[(i + row * 2 + Math.floor(pr.seed * 6)) % colors.length];
+        ctx.fillRect(x - 12 + i * 5, y - 30 + row * 10, 4, 8);
+      }
+    }
+  } else if (pr.type === 'candle') {
+    // candlestick base
+    ctx.fillStyle = '#3a2818';
+    ctx.fillRect(x - 4, y - 2, 8, 4);
+    ctx.fillRect(x - 2, y - 14, 4, 12);
+    // candle
+    ctx.fillStyle = '#e8e0c0';
+    ctx.fillRect(x - 1.5, y - 22, 3, 8);
+    // flame
+    const flicker = 0.7 + Math.sin(game.t * 8 + pr.seed * 10) * 0.3;
+    const grad = ctx.createRadialGradient(x, y - 24, 0.5, x, y - 24, 12);
+    grad.addColorStop(0, `rgba(220, 140, 255, ${flicker})`);
+    grad.addColorStop(1, 'rgba(140, 60, 220, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(x, y - 24, 12, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255, 220, 255, ${flicker})`;
+    ctx.beginPath();
+    ctx.ellipse(x, y - 24, 1.5, 4, 0, 0, TAU);
+    ctx.fill();
+  } else if (pr.type === 'book') {
+    ctx.fillStyle = pr.seed < 0.5 ? '#3a2a5a' : '#5a2a3a';
+    ctx.fillRect(x - 6, y - 3, 12, 4);
+    ctx.fillStyle = '#d8c890';
+    ctx.fillRect(x - 5, y - 2.5, 10, 0.6);
+  } else if (pr.type === 'anvil') {
+    ctx.fillStyle = '#1a1a20';
+    // base
+    ctx.fillRect(x - 8, y - 2, 16, 4);
+    // body
+    ctx.beginPath();
+    ctx.moveTo(x - 10, y - 4);
+    ctx.lineTo(x - 14, y - 10);
+    ctx.lineTo(x + 14, y - 10);
+    ctx.lineTo(x + 10, y - 4);
+    ctx.closePath();
+    ctx.fill();
+    // top edge highlight
+    ctx.fillStyle = '#3a3a40';
+    ctx.fillRect(x - 14, y - 11, 28, 1);
+  } else if (pr.type === 'magmaCrack') {
+    const pulse = 0.5 + Math.sin(game.t * 4 + pr.seed * 10) * 0.3;
+    ctx.fillStyle = `rgba(255, 100, 40, ${pulse * 0.4})`;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 28, 7, 0, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255, 200, 80, ${pulse})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x - 22, y);
+    ctx.lineTo(x - 6, y - 3);
+    ctx.lineTo(x + 8, y + 2);
+    ctx.lineTo(x + 22, y - 1);
+    ctx.stroke();
+  } else if (pr.type === 'forgeBlock') {
+    // small forge with glowing coals
+    ctx.fillStyle = '#1a0808';
+    ctx.fillRect(x - 14, y - 14, 28, 14);
+    ctx.fillStyle = '#3a1a10';
+    ctx.fillRect(x - 12, y - 12, 24, 4);
+    // glow
+    const pulse = 0.6 + Math.sin(game.t * 5 + pr.seed * 5) * 0.3;
+    const glow = ctx.createRadialGradient(x, y - 6, 1, x, y - 6, 22);
+    glow.addColorStop(0, `rgba(255, 200, 80, ${pulse * 0.8})`);
+    glow.addColorStop(1, 'rgba(255, 80, 20, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(x - 22, y - 22, 44, 26);
+    ctx.fillStyle = `rgba(255, 140, 40, ${pulse})`;
+    ctx.fillRect(x - 8, y - 8, 16, 4);
   }
 }
 
@@ -3759,6 +4236,8 @@ function startGame() {
   game.embers = [];
   game.damageNums = [];
   game.pickups = [];
+  game.props = [];
+  game.lastPropX = 0;
   game.cameraX = 0;
   game.spawnTimer = 1.5;
   game.kills = 0;
@@ -3785,7 +4264,7 @@ function startGame() {
   }
   killsEl.textContent = '☠ 0';
   coinsEl.textContent = '⛁ 0';
-  stageEl.textContent = 'Étage 1';
+  stageEl.textContent = 'Étage 1 · Donjon';
   hpBar.style.width = '100%';
   hpText.textContent = '100/100';
   updateWeaponUI();
