@@ -1087,7 +1087,7 @@ function drawChest() {
 }
 
 function updateEmbers(dt) {
-  if (Math.random() < dt * 8) {
+  if (Math.random() < dt * 22) {
     game.embers.push({
       x: game.cameraX + rand(-50, W + 50),
       y: rand(bandTop, H),
@@ -2458,6 +2458,9 @@ function drawBackground(dt) {
   // Mid layer biome decor (statues, candelabras, etc.)
   drawMidBiome(biome);
 
+  // Dense mid-distance silhouette layer — fills empty space, kills the "fade" feel
+  drawMidSilhouettes(biome);
+
   // Pillars
   const midOff = (game.cameraX * 0.5) % 360;
   for (let i = -1; i < W / 360 + 2; i++) {
@@ -2480,6 +2483,169 @@ function drawBackground(dt) {
 }
 
 // ============ Far biome layer (deep wall) ============
+// Dense mid-distance silhouette layer (between far structures and props) — kills the empty feeling
+function drawMidSilhouettes(biome) {
+  const id = biome.id;
+  const off = (game.cameraX * 0.40) % 90;
+  const base = bandTop - 4;
+  for (let i = -1; i < W / 90 + 2; i++) {
+    const x = i * 90 - off;
+    // Deterministic per-tile seed based on world-x
+    const worldTile = Math.floor((i * 90 + game.cameraX * 0.40) / 90);
+    const seed = ((worldTile * 1103515245 + 12345) >>> 0) / 0xFFFFFFFF;
+    if (id === 'dungeon') {
+      // Broken pillars + low walls
+      if (seed < 0.6) {
+        const h = 50 + seed * 80;
+        ctx.fillStyle = '#08060e';
+        ctx.fillRect(x, base - h, 22, h);
+        // Crenellation top
+        ctx.fillStyle = '#0a0810';
+        ctx.fillRect(x, base - h - 4, 6, 4);
+        ctx.fillRect(x + 8, base - h - 4, 6, 4);
+        ctx.fillRect(x + 16, base - h - 4, 6, 4);
+      } else if (seed < 0.85) {
+        // Arch silhouette
+        ctx.fillStyle = '#06040c';
+        ctx.beginPath();
+        ctx.moveTo(x, base);
+        ctx.lineTo(x, base - 70);
+        ctx.quadraticCurveTo(x + 20, base - 95, x + 40, base - 70);
+        ctx.lineTo(x + 40, base);
+        ctx.lineTo(x + 30, base);
+        ctx.lineTo(x + 30, base - 60);
+        ctx.quadraticCurveTo(x + 20, base - 78, x + 10, base - 60);
+        ctx.lineTo(x + 10, base);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else if (id === 'crypts') {
+      if (seed < 0.5) {
+        // Tombstone
+        ctx.fillStyle = '#0a1810';
+        ctx.beginPath();
+        ctx.moveTo(x + 4, base);
+        ctx.lineTo(x + 4, base - 40);
+        ctx.quadraticCurveTo(x + 14, base - 50, x + 24, base - 40);
+        ctx.lineTo(x + 24, base);
+        ctx.closePath();
+        ctx.fill();
+        // Cross
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(x + 13, base - 36, 2, 18);
+        ctx.fillRect(x + 9, base - 30, 10, 2);
+      } else if (seed < 0.8) {
+        // Open coffin standing
+        ctx.fillStyle = '#0a1a10';
+        ctx.beginPath();
+        ctx.moveTo(x + 6, base);
+        ctx.lineTo(x + 4, base - 60);
+        ctx.lineTo(x + 12, base - 70);
+        ctx.lineTo(x + 22, base - 70);
+        ctx.lineTo(x + 30, base - 60);
+        ctx.lineTo(x + 28, base);
+        ctx.closePath();
+        ctx.fill();
+        // Inner dark
+        ctx.fillStyle = '#020806';
+        ctx.fillRect(x + 10, base - 56, 14, 50);
+      }
+    } else if (id === 'caves') {
+      if (seed < 0.55) {
+        // Tall stalagmite cluster
+        ctx.fillStyle = '#0a0e16';
+        for (let s = 0; s < 3; s++) {
+          const sx = x + s * 9 + 2;
+          const sh = 30 + ((seed * 70 + s * 13) % 50);
+          ctx.beginPath();
+          ctx.moveTo(sx, base);
+          ctx.lineTo(sx + 4, base - sh);
+          ctx.lineTo(sx + 8, base);
+          ctx.closePath();
+          ctx.fill();
+        }
+      } else if (seed < 0.85) {
+        // Boulder
+        ctx.fillStyle = '#0a0e18';
+        ctx.beginPath();
+        ctx.ellipse(x + 18, base - 14, 22, 18, 0, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = '#10141e';
+        ctx.beginPath();
+        ctx.ellipse(x + 14, base - 18, 12, 9, 0, 0, TAU);
+        ctx.fill();
+      }
+    } else if (id === 'library') {
+      if (seed < 0.6) {
+        // Tall bookcase silhouette (shorter than the far one)
+        ctx.fillStyle = '#0c0418';
+        ctx.fillRect(x + 2, base - 80, 30, 80);
+        // Shelves
+        ctx.fillStyle = '#1a0a24';
+        for (let s = 1; s <= 4; s++) ctx.fillRect(x + 2, base - 80 + s * 16, 30, 2);
+        // Tiny glowing rune
+        if (seed > 0.4) {
+          const pulse = 0.5 + Math.sin(game.t * 2 + seed * 10) * 0.3;
+          ctx.fillStyle = `rgba(200, 140, 255, ${pulse})`;
+          ctx.fillRect(x + 14, base - 50, 4, 4);
+        }
+      } else if (seed < 0.85) {
+        // Lectern with floating candle
+        ctx.fillStyle = '#0c0418';
+        ctx.fillRect(x + 8, base - 28, 18, 28);
+        ctx.beginPath();
+        ctx.moveTo(x + 6, base - 32);
+        ctx.lineTo(x + 28, base - 38);
+        ctx.lineTo(x + 28, base - 30);
+        ctx.lineTo(x + 6, base - 28);
+        ctx.closePath();
+        ctx.fill();
+        // Floating purple flame above
+        const pulse = 0.5 + Math.sin(game.t * 4 + seed * 6) * 0.4;
+        const grad = ctx.createRadialGradient(x + 17, base - 48, 0.5, x + 17, base - 48, 10);
+        grad.addColorStop(0, `rgba(220, 140, 255, ${pulse})`);
+        grad.addColorStop(1, 'rgba(120, 60, 200, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x + 7, base - 58, 20, 18);
+      }
+    } else if (id === 'forge') {
+      if (seed < 0.55) {
+        // Forge with glowing coals
+        ctx.fillStyle = '#0a0404';
+        ctx.fillRect(x + 2, base - 26, 30, 26);
+        ctx.fillStyle = '#1a0808';
+        ctx.fillRect(x + 4, base - 24, 26, 6);
+        // Glowing coals
+        const pulse = 0.6 + Math.sin(game.t * 5 + seed * 8) * 0.3;
+        const grad = ctx.createRadialGradient(x + 17, base - 21, 1, x + 17, base - 21, 18);
+        grad.addColorStop(0, `rgba(255, 200, 80, ${pulse})`);
+        grad.addColorStop(0.5, `rgba(255, 100, 30, ${pulse * 0.6})`);
+        grad.addColorStop(1, 'rgba(180, 30, 0, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x - 4, base - 42, 40, 30);
+      } else if (seed < 0.85) {
+        // Anvil silhouette
+        ctx.fillStyle = '#0a0608';
+        ctx.fillRect(x + 6, base - 6, 22, 6);
+        ctx.beginPath();
+        ctx.moveTo(x + 4, base - 8);
+        ctx.lineTo(x, base - 18);
+        ctx.lineTo(x + 34, base - 18);
+        ctx.lineTo(x + 30, base - 8);
+        ctx.closePath();
+        ctx.fill();
+        // Spark on top occasionally
+        if (Math.sin(game.t * 8 + seed * 20) > 0.85) {
+          ctx.fillStyle = '#ffd860';
+          ctx.beginPath();
+          ctx.arc(x + 17, base - 18, 1.5, 0, TAU);
+          ctx.fill();
+        }
+      }
+    }
+  }
+}
+
 function drawFarBiome(biome) {
   const id = biome.id;
   if (id === 'dungeon') {
@@ -3160,8 +3326,8 @@ function updateCreatures(dt) {
   const biome = getBiome();
   const id = biome.id;
 
-  // Spawn rates per biome
-  if (id === 'dungeon' && Math.random() < dt * 0.6) {
+  // Spawn rates per biome (densified — 2-3× more life everywhere)
+  if (id === 'dungeon' && Math.random() < dt * 1.8) {
     // Bat flying across (deep background)
     const fromLeft = Math.random() < 0.5;
     game.creatures.push({
@@ -3174,7 +3340,7 @@ function updateCreatures(dt) {
       life: 6, maxLife: 6,
       depth: rand(0.6, 0.95),  // 1 = full size, smaller = farther
     });
-  } else if (id === 'crypts' && Math.random() < dt * 0.9) {
+  } else if (id === 'crypts' && Math.random() < dt * 2.5) {
     // Wandering soul (drifts upward, fades)
     game.creatures.push({
       kind: 'soul',
@@ -3186,7 +3352,7 @@ function updateCreatures(dt) {
       life: rand(3, 5), maxLife: 5,
       size: rand(8, 14),
     });
-  } else if (id === 'caves' && Math.random() < dt * 2.0) {
+  } else if (id === 'caves' && Math.random() < dt * 5.5) {
     // Glowbug (small luminous insect, zigzag)
     game.creatures.push({
       kind: 'glowbug',
@@ -3198,7 +3364,7 @@ function updateCreatures(dt) {
       life: rand(2.5, 4.5), maxLife: 4.5,
       color: Math.random() < 0.7 ? '120,200,255' : '180,140,255',
     });
-  } else if (id === 'library' && Math.random() < dt * 0.5) {
+  } else if (id === 'library' && Math.random() < dt * 1.5) {
     // Floating spell book (flapping pages)
     game.creatures.push({
       kind: 'flybook',
@@ -3210,7 +3376,7 @@ function updateCreatures(dt) {
       flap: 0,
       life: rand(4, 7), maxLife: 7,
     });
-  } else if (id === 'forge' && Math.random() < dt * 0.45) {
+  } else if (id === 'forge' && Math.random() < dt * 1.2) {
     // Hanging hammer that strikes (background mech)
     const startX = game.cameraX + W + rand(40, 240);
     game.creatures.push({
@@ -3444,10 +3610,10 @@ function drawForgeHammer(c, x) {
 function maybeSpawnForeground() {
   const biome = getBiome();
   const last = game.foreground.length ? game.foreground[game.foreground.length - 1].x : 0;
-  // Spawn one every ~180-280 world pixels ahead of camera
+  // Spawn frequently (every ~90-160 world px) — denser foreground
   if (game.cameraX + W + 80 < last - 60) return;
-  if (Math.random() < 0.02 || game.foreground.length === 0) {
-    const x = Math.max(game.cameraX + W + rand(80, 200), last + rand(180, 320));
+  if (Math.random() < 0.06 || game.foreground.length === 0) {
+    const x = Math.max(game.cameraX + W + rand(60, 140), last + rand(90, 160));
     const types = {
       dungeon: ['chain', 'banner'],
       crypts:  ['boneString', 'hangingSkull'],
@@ -3969,7 +4135,8 @@ function drawAtmosphere(dt) {
 // ============ Props (decorative scenery) ============
 function maybeSpawnProp() {
   if (!game.lastPropX) game.lastPropX = -200;
-  const target = game.lastPropX + rand(120, 260);
+  // Spawn more densely — 60-130 px instead of 120-260
+  const target = game.lastPropX + rand(60, 130);
   if (game.cameraX < target) return;
   game.lastPropX = game.cameraX;
   const biome = getBiome();
@@ -3978,6 +4145,15 @@ function maybeSpawnProp() {
   // anchor on or near the floor
   const y = rand(bandTop + 25, bandBot + 5);
   game.props.push({ type, x, y, seed: Math.random() });
+  // 30% chance to spawn a second prop right after (clustered)
+  if (Math.random() < 0.30) {
+    game.props.push({
+      type: biome.propTypes[Math.floor(Math.random() * biome.propTypes.length)],
+      x: x + rand(20, 50),
+      y: rand(bandTop + 25, bandBot + 5),
+      seed: Math.random(),
+    });
+  }
 }
 
 function updateProps() {
@@ -6119,25 +6295,41 @@ function drawTorchOverlay() {
   const flicker = 1 + Math.sin(game.t * 6) * 0.05;
   const attackPulse = p.attackTimer > 0 ? 1.25 : 1;
   const comboBoost = 1 + Math.min(0.4, game.combo * 0.015);
-  const innerR = 80 * flicker * attackPulse * comboBoost;
-  const outerR = Math.max(W, H) * 0.7;
+  const innerR = 110 * flicker * attackPulse * comboBoost;
+  const outerR = Math.max(W, H) * 0.85;
+
+  // Biome-tinted vignette (instead of pure black — keeps world visible AND atmospheric)
+  const biome = getBiome();
+  const vignetteColor = biome.id === 'crypts' ? '6, 16, 10'
+    : biome.id === 'caves' ? '6, 10, 18'
+    : biome.id === 'library' ? '10, 6, 18'
+    : biome.id === 'forge' ? '20, 6, 4'
+    : '6, 6, 12';
   const grad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR);
-  grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
-  grad.addColorStop(0.35, 'rgba(0, 0, 0, 0.32)');
-  grad.addColorStop(1, 'rgba(0, 0, 0, 0.88)');
+  grad.addColorStop(0, `rgba(${vignetteColor}, 0)`);
+  grad.addColorStop(0.45, `rgba(${vignetteColor}, 0.18)`);
+  grad.addColorStop(1, `rgba(${vignetteColor}, 0.55)`);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
-  // Biome-tinted ambient warm aura
-  const biome = getBiome();
+  // Biome ambient mood wash (subtle tint over the whole screen — gives each world a "color of the soul")
+  const moodColor = biome.id === 'crypts' ? '40, 120, 70'
+    : biome.id === 'caves' ? '60, 100, 160'
+    : biome.id === 'library' ? '120, 60, 160'
+    : biome.id === 'forge' ? '200, 70, 20'
+    : '120, 60, 40';
+  ctx.fillStyle = `rgba(${moodColor}, 0.05)`;
+  ctx.fillRect(0, 0, W, H);
+
+  // Biome-tinted warm aura around player (closer halo)
   const auraColor = biome.id === 'crypts' ? '120, 220, 140'
     : biome.id === 'caves' ? '120, 180, 240'
     : biome.id === 'library' ? '180, 120, 220'
     : biome.id === 'forge' ? '255, 90, 30'
     : '255, 100, 50';
-  const auraR = 220 * flicker * attackPulse;
+  const auraR = 260 * flicker * attackPulse;
   const warm = ctx.createRadialGradient(cx, cy, 20, cx, cy, auraR);
-  warm.addColorStop(0, `rgba(${auraColor}, ${0.22 * attackPulse})`);
+  warm.addColorStop(0, `rgba(${auraColor}, ${0.18 * attackPulse})`);
   warm.addColorStop(1, `rgba(${auraColor}, 0)`);
   ctx.fillStyle = warm;
   ctx.fillRect(0, 0, W, H);
