@@ -2430,19 +2430,25 @@ function getBiome() {
 // ============ Background ============
 function drawBackground(dt) {
   const biome = getBiome();
+
+  // 1. Sky / distance gradient (the void behind any opening)
   const skyGrad = ctx.createLinearGradient(0, 0, 0, bandTop);
   skyGrad.addColorStop(0, biome.skyTop);
   skyGrad.addColorStop(1, biome.skyBot);
   ctx.fillStyle = skyGrad;
   ctx.fillRect(0, 0, W, bandTop);
 
-  // Far iconic biome layer (deep wall structures)
+  // 2. CONTINUOUS BACK WALL — gives the world architectural coherence.
+  //    Drawn first; then openings (windows, niches) cut through it visually.
+  drawBackWall(biome);
+
+  // 3. Far iconic biome openings (windows, niches, crystals) — embedded IN the wall
   drawFarBiome(biome);
 
-  // Ceiling decoration per biome
+  // 4. Ceiling decoration per biome
   drawCeiling(biome);
 
-  // Background cracks (faint, on top of structures)
+  // 5. Subtle cracks across the wall
   ctx.strokeStyle = biome.crackColor;
   ctx.lineWidth = 1;
   const farOff = (game.cameraX * 0.2) % 240;
@@ -2455,31 +2461,107 @@ function drawBackground(dt) {
     ctx.stroke();
   }
 
-  // Mid layer biome decor (statues, candelabras, etc.)
+  // 6. Mid biome decor (gargoyles, chandeliers, etc.)
   drawMidBiome(biome);
 
-  // Dense mid-distance silhouette layer — fills empty space, kills the "fade" feel
+  // 7. Dense mid-distance silhouette layer
   drawMidSilhouettes(biome);
 
-  // Pillars
+  // 8. PILLARS — now span FULL height from ceiling (0) to floor (bandTop)
   const midOff = (game.cameraX * 0.5) % 360;
   for (let i = -1; i < W / 360 + 2; i++) {
     const x = i * 360 - midOff;
-    drawPillar(x, bandTop - 50, biome);
+    drawPillar(x, biome);
   }
 
-  // Wall torches
-  const torchOff = (game.cameraX * 0.6) % 480;
-  for (let i = -1; i < W / 480 + 2; i++) {
-    const x = i * 480 + 240 - torchOff;
-    drawWallTorch(x, bandTop * 0.45, biome);
+  // 9. Wall torches — mounted on the back wall with brackets
+  const torchOff = (game.cameraX * 0.6) % 280;
+  for (let i = -1; i < W / 280 + 2; i++) {
+    const x = i * 280 + 140 - torchOff;
+    drawWallTorch(x, bandTop * 0.62, biome);
   }
 
-  // Biome fog tint over the upper half (subtle)
+  // 10. Biome fog tint
   if (biome.fogTint) {
     ctx.fillStyle = biome.fogTint;
     ctx.fillRect(0, 0, W, bandTop);
   }
+}
+
+// ============ Back wall (continuous structure behind everything) ============
+function drawBackWall(biome) {
+  const wallTop = 28;       // below the ceiling decor
+  const wallBot = bandTop;  // meets the floor
+  const wallH = wallBot - wallTop;
+
+  // Base wall color per biome (deeper than sky, ties the room together)
+  const wallColors = {
+    dungeon: { base: '#16121c', light: '#221c2a', shadow: '#0a0710', mortar: '#04030a' },
+    crypts:  { base: '#0e1a14', light: '#1a2a1e', shadow: '#06100a', mortar: '#02060a' },
+    caves:   { base: '#12161e', light: '#1c2230', shadow: '#080a12', mortar: '#02040a' },
+    library: { base: '#18102a', light: '#241844', shadow: '#0a0618', mortar: '#04020c' },
+    forge:   { base: '#180a08', light: '#2a1410', shadow: '#0a0604', mortar: '#04020a' },
+  };
+  const c = wallColors[biome.id] || wallColors.dungeon;
+
+  // Solid wall base with subtle vertical gradient (slightly darker near floor)
+  const grad = ctx.createLinearGradient(0, wallTop, 0, wallBot);
+  grad.addColorStop(0, c.base);
+  grad.addColorStop(0.7, c.base);
+  grad.addColorStop(1, c.shadow);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, wallTop, W, wallH);
+
+  // Brick courses — parallax 0.45 so they scroll with the wall
+  const off = (game.cameraX * 0.45) % 64;
+  const rowH = 18;
+  const rows = Math.ceil(wallH / rowH) + 1;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = c.mortar;
+
+  for (let r = 0; r < rows; r++) {
+    const y = wallTop + r * rowH;
+    if (y > wallBot) break;
+    // Horizontal mortar line
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+    // Vertical mortar lines, offset every other row (brick pattern)
+    const stagger = r % 2 ? 32 : 0;
+    const cellOff = (off + stagger) % 64;
+    for (let x = -cellOff; x < W + 64; x += 64) {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + rowH);
+      ctx.stroke();
+      // Per-brick subtle highlight (top edge)
+      if (((Math.floor((x + game.cameraX * 0.45 + stagger) / 64) * 7 + r * 13) % 5) === 0) {
+        ctx.fillStyle = c.light;
+        ctx.fillRect(x + 1, y + 1, 62, 1);
+      }
+    }
+  }
+
+  // Worn patches (random darker stains, deterministic per region)
+  const stainOff = (game.cameraX * 0.45) % 320;
+  for (let i = -1; i < W / 320 + 2; i++) {
+    const sx = i * 320 - stainOff;
+    const worldTile = Math.floor((i * 320 + game.cameraX * 0.45) / 320);
+    const seed = ((worldTile * 2654435761) >>> 0) / 0xFFFFFFFF;
+    if (seed < 0.5) continue;
+    const stainGrad = ctx.createRadialGradient(sx + 60, wallTop + 60 + seed * 80, 5, sx + 60, wallTop + 60 + seed * 80, 80);
+    stainGrad.addColorStop(0, c.shadow);
+    stainGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = stainGrad;
+    ctx.fillRect(sx, wallTop, 160, wallH);
+  }
+
+  // Floor baseboard (heavy stone line where wall meets floor)
+  ctx.fillStyle = c.shadow;
+  ctx.fillRect(0, wallBot - 4, W, 4);
+  ctx.fillStyle = c.light;
+  ctx.fillRect(0, wallBot - 4, W, 1);
 }
 
 // ============ Far biome layer (deep wall) ============
@@ -2677,10 +2759,29 @@ function drawFarBiome(biome) {
 }
 
 function drawGothicWindow(x, y, w, h) {
+  // STONE NICHE around the window (carved into the wall — gives it weight)
+  ctx.fillStyle = '#0a0810';
+  ctx.fillRect(x - 8, y - w * 0.25, w + 16, h + w * 0.3 + 6);
+  // Stone keystone (top arch trim)
+  ctx.fillStyle = '#26222e';
+  ctx.beginPath();
+  ctx.moveTo(x - 8, y + w * 0.5);
+  ctx.quadraticCurveTo(x + w / 2, y - w * 0.32, x + w + 8, y + w * 0.5);
+  ctx.lineTo(x + w + 4, y + w * 0.5);
+  ctx.quadraticCurveTo(x + w / 2, y - w * 0.2, x - 4, y + w * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  // Stone sill at the bottom
+  ctx.fillStyle = '#1a1622';
+  ctx.fillRect(x - 10, y + h, w + 20, 6);
+  ctx.fillStyle = '#2c2638';
+  ctx.fillRect(x - 10, y + h, w + 20, 2);
+
+  // Window glass with moonlight gradient
   const grad = ctx.createLinearGradient(0, y, 0, y + h);
-  grad.addColorStop(0, 'rgba(150, 180, 230, 0.50)');
-  grad.addColorStop(0.5, 'rgba(80, 110, 170, 0.35)');
-  grad.addColorStop(1, 'rgba(30, 50, 90, 0.18)');
+  grad.addColorStop(0, 'rgba(160, 190, 240, 0.65)');
+  grad.addColorStop(0.5, 'rgba(80, 110, 170, 0.45)');
+  grad.addColorStop(1, 'rgba(30, 50, 90, 0.25)');
   ctx.fillStyle = grad;
   ctx.beginPath();
   ctx.moveTo(x, y + w * 0.5);
@@ -2690,28 +2791,50 @@ function drawGothicWindow(x, y, w, h) {
   ctx.quadraticCurveTo(x + w / 2, y - w * 0.2, x, y + w * 0.5);
   ctx.closePath();
   ctx.fill();
-  // Frame (dark)
-  ctx.fillStyle = '#04040a';
-  ctx.fillRect(x - 2, y + h, w + 4, 4);
-  ctx.fillRect(x - 3, y + w * 0.5, 3, h - w * 0.5 + 4);
-  ctx.fillRect(x + w, y + w * 0.5, 3, h - w * 0.5 + 4);
-  // Cross divider
+
+  // Cross divider (lead came)
   ctx.fillStyle = '#04040a';
   ctx.fillRect(x + w / 2 - 1.5, y, 3, h);
   ctx.fillRect(x, y + h * 0.45, w, 2);
   ctx.fillRect(x, y + h * 0.72, w, 2);
-  // Pointed arch frame
+
+  // Inner pointed-arch frame line
   ctx.strokeStyle = '#04040a';
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 2.5;
   ctx.beginPath();
   ctx.moveTo(x - 1, y + w * 0.5);
   ctx.quadraticCurveTo(x + w / 2, y - w * 0.22, x + w + 1, y + w * 0.5);
   ctx.stroke();
+
+  // Light spill on the wall around the window (soft halo)
+  const halo = ctx.createRadialGradient(x + w / 2, y + h / 2, 4, x + w / 2, y + h / 2, 70);
+  halo.addColorStop(0, 'rgba(160, 190, 240, 0.15)');
+  halo.addColorStop(1, 'rgba(160, 190, 240, 0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(x - 30, y - 20, w + 60, h + 50);
 }
 
 function drawCryptNiche(x, baseY) {
   const w = 36, h = 56;
-  // Niche cavity
+  // Stone frame around the niche (wider than the cavity, gives it depth)
+  ctx.fillStyle = '#16241a';
+  ctx.beginPath();
+  ctx.moveTo(x - 6, baseY + 4);
+  ctx.lineTo(x - 6, baseY - h + w / 2 - 4);
+  ctx.quadraticCurveTo(x + w / 2, baseY - h - w * 0.2, x + w + 6, baseY - h + w / 2 - 4);
+  ctx.lineTo(x + w + 6, baseY + 4);
+  ctx.closePath();
+  ctx.fill();
+  // Lighter top arch trim
+  ctx.fillStyle = '#22341e';
+  ctx.beginPath();
+  ctx.moveTo(x - 5, baseY - h + w / 2 - 2);
+  ctx.quadraticCurveTo(x + w / 2, baseY - h - w * 0.15, x + w + 5, baseY - h + w / 2 - 2);
+  ctx.lineTo(x + w + 2, baseY - h + w / 2);
+  ctx.quadraticCurveTo(x + w / 2, baseY - h - w * 0.1, x - 2, baseY - h + w / 2);
+  ctx.closePath();
+  ctx.fill();
+  // Niche cavity (dark interior)
   ctx.fillStyle = '#040804';
   ctx.beginPath();
   ctx.moveTo(x, baseY);
@@ -3162,129 +3285,152 @@ function drawCeiling(biome) {
   }
 }
 
-function drawPillar(x, baseY, biome) {
-  const grad = ctx.createLinearGradient(x, 0, x + 50, 0);
+function drawPillar(x, biome) {
+  // FULL-HEIGHT pillar: ceiling (y=0) to floor (bandTop)
+  const top = 0;
+  const bot = bandTop;
+  const w = 50;
+
+  // Shaft gradient (vertical 3-stop, gives stone roundness)
+  const grad = ctx.createLinearGradient(x, 0, x + w, 0);
   grad.addColorStop(0, biome.pillar[0]);
   grad.addColorStop(0.5, biome.pillar[1]);
   grad.addColorStop(1, biome.pillar[2]);
   ctx.fillStyle = grad;
-  ctx.fillRect(x, 30, 50, baseY - 30);
+  ctx.fillRect(x, top + 18, w, bot - top - 30);
+
+  // Top capital (wider, 3-tier stone block)
   ctx.fillStyle = biome.pillarCap;
-  ctx.fillRect(x - 4, 30, 58, 14);
-  ctx.fillRect(x - 4, baseY - 14, 58, 14);
+  ctx.fillRect(x - 8, top + 18, w + 16, 10);
+  ctx.fillRect(x - 5, top + 10, w + 10, 8);
+  ctx.fillRect(x - 2, top, w + 4, 10);
+
+  // Base capital (wider stone block at floor)
+  ctx.fillStyle = biome.pillarCap;
+  ctx.fillRect(x - 5, bot - 18, w + 10, 8);
+  ctx.fillRect(x - 8, bot - 10, w + 16, 10);
+
+  // Vertical seam (gives depth + the impression of a column)
   ctx.strokeStyle = biome.crackColor;
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(x + 25, 50);
-  ctx.lineTo(x + 22, baseY - 30);
+  ctx.moveTo(x + 25, top + 28);
+  ctx.lineTo(x + 22, bot - 22);
   ctx.stroke();
-  // Forge biome: glowing magma vein on pillar
+
+  // Side highlight strip (lighter edge — suggests light from one side)
+  ctx.fillStyle = biome.pillar[2];
+  ctx.fillRect(x + w - 6, top + 22, 2, bot - top - 42);
+
+  // Forge: glowing magma vein
   if (biome.id === 'forge') {
     const pulse = 0.5 + Math.sin(game.t * 3 + x * 0.05) * 0.3;
     ctx.fillStyle = `rgba(255, 100, 40, ${pulse})`;
-    ctx.fillRect(x + 20, 60, 3, baseY - 80);
+    ctx.fillRect(x + 20, top + 30, 3, bot - top - 50);
   }
-  // Library biome: glowing rune on pillar
+  // Library: glowing rune
   if (biome.id === 'library') {
     const pulse = 0.4 + Math.sin(game.t * 2 + x * 0.05) * 0.25;
     ctx.fillStyle = `rgba(180, 120, 220, ${pulse})`;
-    ctx.fillRect(x + 22, 80 + Math.sin(x * 0.01) * 30, 6, 6);
+    ctx.fillRect(x + 22, top + 80 + ((x * 7) % 60), 6, 6);
   }
 }
 
 function drawWallTorch(x, y, biome) {
   const flicker = Math.sin(game.t * 12 + x) * 0.2 + 0.8;
+
+  // MOUNTING BRACKET — triangle of stone fixed to the wall
+  ctx.fillStyle = '#1a1410';
+  ctx.beginPath();
+  ctx.moveTo(x - 8, y + 4);
+  ctx.lineTo(x + 8, y + 4);
+  ctx.lineTo(x + 4, y + 14);
+  ctx.lineTo(x - 4, y + 14);
+  ctx.closePath();
+  ctx.fill();
+  // Bracket bolts (visible mounting points)
   ctx.fillStyle = '#3a2a1a';
-  ctx.fillRect(x - 3, y, 6, 14);
-  const grad = ctx.createRadialGradient(x, y - 6, 1, x, y - 6, 22);
+  ctx.beginPath(); ctx.arc(x - 6, y + 6, 1.4, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 6, y + 6, 1.4, 0, TAU); ctx.fill();
+
+  // Torch shaft (wooden, sticks UP from the bracket)
+  ctx.fillStyle = '#2a1808';
+  ctx.fillRect(x - 2.5, y - 12, 5, 18);
+  ctx.fillStyle = '#3a2410';
+  ctx.fillRect(x - 2.5, y - 12, 5, 1);
+  ctx.fillRect(x - 2.5, y, 5, 1);
+
+  // Iron cup / brazier on top
+  ctx.fillStyle = '#1a1410';
+  ctx.beginPath();
+  ctx.moveTo(x - 5, y - 12);
+  ctx.lineTo(x + 5, y - 12);
+  ctx.lineTo(x + 3, y - 18);
+  ctx.lineTo(x - 3, y - 18);
+  ctx.closePath();
+  ctx.fill();
+
+  // Flame
+  const grad = ctx.createRadialGradient(x, y - 22, 1, x, y - 22, 22);
   grad.addColorStop(0, biome.torchFlame[0] + flicker + ')');
   grad.addColorStop(0.4, biome.torchFlame[1] + (flicker * 0.8) + ')');
   grad.addColorStop(1, biome.torchFlame[2]);
   ctx.fillStyle = grad;
   ctx.beginPath();
-  ctx.arc(x, y - 6, 22, 0, TAU);
+  ctx.arc(x, y - 22, 22, 0, TAU);
   ctx.fill();
+  // Flame core
   ctx.fillStyle = biome.torchCore + flicker + ')';
   ctx.beginPath();
-  ctx.ellipse(x, y - 6, 3, 6, 0, 0, TAU);
+  ctx.ellipse(x, y - 22, 3, 7, 0, 0, TAU);
   ctx.fill();
+  // Pool of warm light on the wall around the torch
+  const wallGlow = ctx.createRadialGradient(x, y - 8, 4, x, y - 8, 70);
+  wallGlow.addColorStop(0, biome.torchFlame[0] + (flicker * 0.18) + ')');
+  wallGlow.addColorStop(1, biome.torchFlame[2]);
+  ctx.fillStyle = wallGlow;
+  ctx.fillRect(x - 70, y - 60, 140, 90);
+
+  // Occasional spark drifting up
+  if (Math.random() < 0.10) {
+    game.embers.push({
+      x: x + game.cameraX + rand(-3, 3),
+      y: y - 22,
+      vx: rand(-6, 6),
+      vy: rand(-50, -25),
+      life: rand(1, 2), maxLife: 2,
+      size: rand(1, 2),
+    });
+  }
 }
 
 function drawGround() {
   const biome = getBiome();
+  const floorH = H - bandTop;
+
+  // Base floor gradient (lighter near the camera, darker into the foreground/depth)
   const grad = ctx.createLinearGradient(0, bandTop, 0, H);
   grad.addColorStop(0, biome.floorTop);
   grad.addColorStop(1, biome.floorBot);
   ctx.fillStyle = grad;
-  ctx.fillRect(0, bandTop, W, H - bandTop);
-  ctx.lineWidth = 1;
+  ctx.fillRect(0, bandTop, W, floorH);
 
-  if (biome.floorPattern === 'cobble') {
-    ctx.strokeStyle = biome.floorTint;
-    const off = game.cameraX % 80;
-    for (let i = -1; i < W / 80 + 1; i++) {
-      const x = i * 80 - off;
-      ctx.beginPath();
-      ctx.moveTo(x, bandTop);
-      ctx.lineTo(x - 30, H);
-      ctx.stroke();
-    }
+  // Perspective tile pattern — tiles converge toward a vanishing point above
+  // (the wall meets the floor at bandTop). We use horizontal rows that get
+  // smaller toward bandTop, and vertical seams that converge.
+  ctx.lineWidth = 1;
+  if (biome.floorPattern === 'cobble' || biome.floorPattern === 'magma') {
+    drawTiledFloor(biome, 'square');
   } else if (biome.floorPattern === 'crackedStone') {
-    ctx.strokeStyle = biome.floorTint;
-    const off = game.cameraX % 100;
-    for (let i = -1; i < W / 100 + 2; i++) {
-      const x = i * 100 - off;
-      ctx.beginPath();
-      ctx.moveTo(x, bandTop + 20);
-      ctx.lineTo(x + 30, bandTop + 40);
-      ctx.lineTo(x + 10, bandTop + 70);
-      ctx.stroke();
-    }
-    // moss tufts
-    ctx.fillStyle = 'rgba(80, 160, 80, 0.25)';
-    const off2 = game.cameraX % 200;
-    for (let i = -1; i < W / 200 + 1; i++) {
-      const x = i * 200 - off2 + 60;
-      ctx.fillRect(x, bandTop + 10, 12, 3);
-    }
+    drawTiledFloor(biome, 'cracked');
   } else if (biome.floorPattern === 'rough') {
-    ctx.strokeStyle = biome.floorTint;
-    const off = game.cameraX % 60;
-    for (let i = -1; i < W / 60 + 1; i++) {
-      const x = i * 60 - off;
-      ctx.beginPath();
-      ctx.arc(x, bandTop + 40 + (i % 3) * 8, 14, 0, Math.PI);
-      ctx.stroke();
-    }
+    drawTiledFloor(biome, 'rough');
   } else if (biome.floorPattern === 'planks') {
-    ctx.strokeStyle = biome.floorTint;
-    for (let y = bandTop + 20; y < H; y += 24) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(W, y);
-      ctx.stroke();
-    }
-    // vertical seams
-    const off = game.cameraX % 90;
-    ctx.strokeStyle = 'rgba(80, 50, 30, 0.3)';
-    for (let i = -1; i < W / 90 + 1; i++) {
-      const x = i * 90 - off;
-      const yLine = bandTop + 20 + (i % 3) * 24;
-      ctx.beginPath();
-      ctx.moveTo(x, yLine);
-      ctx.lineTo(x, yLine + 24);
-      ctx.stroke();
-    }
-  } else if (biome.floorPattern === 'magma') {
-    ctx.strokeStyle = biome.floorTint;
-    const off = game.cameraX % 80;
-    for (let i = -1; i < W / 80 + 1; i++) {
-      const x = i * 80 - off;
-      ctx.beginPath();
-      ctx.moveTo(x, bandTop);
-      ctx.lineTo(x - 30, H);
-      ctx.stroke();
-    }
-    // glowing magma cracks
+    drawPlankFloor(biome);
+  }
+
+  // Magma extras (glowing cracks on top of the tiles)
+  if (biome.floorPattern === 'magma') {
     const off2 = game.cameraX % 280;
     const pulse = 0.5 + Math.sin(game.t * 2.5) * 0.25;
     ctx.strokeStyle = `rgba(255, 100, 40, ${pulse})`;
@@ -3301,11 +3447,139 @@ function drawGround() {
     }
   }
 
+  // Top edge of the floor (the seam where floor meets wall baseboard)
   ctx.strokeStyle = biome.edgeColor;
+  ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(0, bandTop);
   ctx.lineTo(W, bandTop);
   ctx.stroke();
+
+  // Floor shading near the wall (a soft strip of shadow where wall meets floor)
+  const shadeGrad = ctx.createLinearGradient(0, bandTop, 0, bandTop + 18);
+  shadeGrad.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
+  shadeGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = shadeGrad;
+  ctx.fillRect(0, bandTop, W, 18);
+}
+
+function drawTiledFloor(biome, style) {
+  const floorH = H - bandTop;
+  const off = game.cameraX % 80;
+  // Horizontal "rows" — get tighter near the back (perspective)
+  const rowYs = [];
+  for (let r = 0; r < 8; r++) {
+    // Easing: rows compress toward bandTop
+    const t = r / 7;
+    const eased = Math.pow(t, 1.35);
+    rowYs.push(bandTop + eased * floorH);
+  }
+
+  // Row lines (horizontal seams between courses)
+  ctx.strokeStyle = biome.floorTint;
+  ctx.lineWidth = 1;
+  for (const y of rowYs) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+
+  // Vertical seams converging on a vanishing point above (cx = W/2, vy = bandTop - 80)
+  const vpX = W / 2;
+  const vpY = bandTop - 80;
+  // Bottom-edge tile spacing (80 world px), staggered every other row
+  for (let r = 0; r < rowYs.length - 1; r++) {
+    const yTop = rowYs[r];
+    const yBot = rowYs[r + 1];
+    // Tile width at this depth (interpolate from 80 at bottom to ~38 near back)
+    const t = r / (rowYs.length - 1);
+    const tileW = 80 - t * 44;
+    const stagger = r % 2 ? tileW * 0.5 : 0;
+    const rowOff = (game.cameraX % tileW + stagger) % tileW;
+    for (let x = -rowOff; x < W + tileW; x += tileW) {
+      ctx.beginPath();
+      ctx.moveTo(x, yBot);
+      ctx.lineTo(x, yTop);
+      ctx.stroke();
+      // Per-tile detail
+      if (style === 'cracked' && Math.random() < 0.04) {
+        // Quick crack
+        ctx.strokeStyle = biome.crackColor;
+        ctx.beginPath();
+        ctx.moveTo(x + 6, yTop + 4);
+        ctx.lineTo(x + 18, yTop + 12);
+        ctx.lineTo(x + 14, yTop + 22);
+        ctx.stroke();
+        ctx.strokeStyle = biome.floorTint;
+      } else if (style === 'rough' && Math.random() < 0.04) {
+        // Pebble (rounded bump)
+        ctx.fillStyle = biome.floorTint;
+        ctx.beginPath();
+        ctx.arc(x + tileW * 0.5, (yTop + yBot) * 0.5, 2.5, 0, TAU);
+        ctx.fill();
+      }
+    }
+  }
+
+  // Moss tufts for crackedStone (cryptes)
+  if (style === 'cracked') {
+    ctx.fillStyle = 'rgba(80, 160, 80, 0.30)';
+    const mOff = game.cameraX % 150;
+    for (let i = -1; i < W / 150 + 1; i++) {
+      const x = i * 150 - mOff + 60;
+      const y = rowYs[2 + (i % 3)];
+      ctx.fillRect(x, y - 1, 14, 3);
+    }
+  }
+}
+
+function drawPlankFloor(biome) {
+  const floorH = H - bandTop;
+  // Long horizontal planks that go INTO the depth (parallel to camera motion)
+  // They converge slightly via row spacing.
+  const rows = 7;
+  const plankW = 200; // length along the screen
+  const off = game.cameraX % plankW;
+  // Plank seams (horizontal — separating rows of planks)
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(60, 35, 20, 0.6)';
+  const rowYs = [];
+  for (let r = 0; r <= rows; r++) {
+    const t = r / rows;
+    const eased = Math.pow(t, 1.35);
+    rowYs.push(bandTop + eased * floorH);
+  }
+  for (const y of rowYs) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+  // Plank end-seams (vertical short marks) — staggered per row, scroll with camera
+  ctx.strokeStyle = 'rgba(40, 25, 15, 0.7)';
+  ctx.lineWidth = 1;
+  for (let r = 0; r < rows; r++) {
+    const yTop = rowYs[r];
+    const yBot = rowYs[r + 1];
+    const stagger = (r * 60) % plankW;
+    const rowOff = (off + stagger) % plankW;
+    for (let x = -rowOff; x < W + plankW; x += plankW) {
+      ctx.beginPath();
+      ctx.moveTo(x, yTop);
+      ctx.lineTo(x, yBot);
+      ctx.stroke();
+    }
+  }
+  // Wood grain hint (thin streaks)
+  ctx.strokeStyle = 'rgba(180, 120, 60, 0.08)';
+  for (let r = 0; r < rows; r++) {
+    const y = (rowYs[r] + rowYs[r + 1]) / 2;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
 }
 
 function drawEmbers() {
