@@ -2786,13 +2786,11 @@ function drawFarBiome(biome) {
 }
 
 function drawGothicWindow(x, y, w, h) {
-  // STONE NICHE recess (slightly darker — gives the window depth into the wall)
+  // STONE NICHE recess (darker — gives the window depth into the wall)
   ctx.fillStyle = '#06060c';
   ctx.fillRect(x - 10, y - w * 0.3, w + 20, h + w * 0.35 + 8);
 
-  // === Stained glass panels ===
-  // We define a clipped arch path and fill with multi-color radial gradient,
-  // then overlay subtle colored panes for the "stained" effect.
+  // Clip to arched shape — everything inside is the "glass through the wall"
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(x, y + w * 0.5);
@@ -2803,78 +2801,131 @@ function drawGothicWindow(x, y, w, h) {
   ctx.closePath();
   ctx.clip();
 
-  // Bright divine moonlight base (creates the "from behind" glow)
-  const base = ctx.createRadialGradient(x + w / 2, y + h * 0.6, 1, x + w / 2, y + h * 0.4, w * 1.4);
-  base.addColorStop(0, 'rgba(220, 230, 255, 0.95)');
-  base.addColorStop(0.4, 'rgba(150, 180, 230, 0.75)');
-  base.addColorStop(1, 'rgba(40, 60, 110, 0.55)');
+  // === Dominant moonlight wash (cold blue, NOT rainbow) ===
+  const base = ctx.createRadialGradient(x + w / 2, y + h * 0.55, 1, x + w / 2, y + h * 0.4, w * 1.6);
+  base.addColorStop(0, 'rgba(200, 220, 250, 0.95)');
+  base.addColorStop(0.4, 'rgba(100, 140, 200, 0.78)');
+  base.addColorStop(1, 'rgba(30, 50, 100, 0.5)');
   ctx.fillStyle = base;
   ctx.fillRect(x - 10, y - 30, w + 20, h + 40);
 
-  // Stained colored panels (in a leaded pattern). Pick palette pseudo-randomly per window.
-  const seed = ((x * 12345) >>> 0) / 0xFFFFFFFF;
-  const palettes = [
-    ['rgba(180, 40, 50, 0.55)',  'rgba(60, 100, 200, 0.55)', 'rgba(220, 180, 60, 0.5)'],   // crimson / blue / gold
-    ['rgba(80, 160, 120, 0.55)', 'rgba(160, 70, 180, 0.55)', 'rgba(220, 200, 80, 0.45)'],  // green / purple / yellow
-    ['rgba(70, 100, 200, 0.55)', 'rgba(220, 80, 60, 0.50)',  'rgba(180, 180, 220, 0.4)'],  // blue / red / silver
+  // === 3 vertical lancets (gothic window has 3 narrow arched panes, not 4 stripes) ===
+  // Each lancet is a tall narrow arch within the main arch. Stone mullions separate them.
+  const lancetCount = 3;
+  const lancetGap = 3;
+  const lancetW = (w - (lancetCount + 1) * lancetGap) / lancetCount;
+  const lancetTopY = y + w * 0.30; // where lancet arches start (top portion is rose area)
+  // Inside each lancet: subtle vertical tint (one cool color per lancet for variety, very low alpha)
+  const lancetTints = [
+    'rgba(60, 120, 200, 0.18)',  // cool blue
+    'rgba(120, 90, 180, 0.16)',  // dusk purple (center)
+    'rgba(60, 120, 200, 0.18)',  // cool blue
   ];
-  const pal = palettes[Math.floor(seed * palettes.length) % palettes.length];
-
-  // Diamond panes — 4 columns × 5 rows
-  const cols = 4, rows = 5;
-  const cellW = w / cols;
-  const cellH = h / rows;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const idx = (r * 3 + c * 7 + Math.floor(seed * 17)) % pal.length;
-      ctx.fillStyle = pal[idx];
-      const px = x + c * cellW;
-      const py = y + r * cellH;
-      ctx.fillRect(px, py, cellW, cellH);
-    }
-  }
-
-  // Central rose medallion (a circle of bright glow)
-  const rose = ctx.createRadialGradient(x + w / 2, y + h * 0.35, 1, x + w / 2, y + h * 0.35, w * 0.5);
-  rose.addColorStop(0, 'rgba(255, 230, 180, 0.9)');
-  rose.addColorStop(0.3, 'rgba(220, 160, 80, 0.4)');
-  rose.addColorStop(1, 'rgba(180, 100, 50, 0)');
-  ctx.fillStyle = rose;
-  ctx.fillRect(x - 6, y - 6, w + 12, h * 0.7);
-
-  // Petal-like spokes around the rose (white radial bars)
-  ctx.strokeStyle = 'rgba(255, 240, 200, 0.4)';
-  ctx.lineWidth = 1.2;
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * TAU;
+  for (let li = 0; li < lancetCount; li++) {
+    const lx = x + lancetGap + li * (lancetW + lancetGap);
+    ctx.fillStyle = lancetTints[li];
+    // Lancet body (rectangle + arched top)
     ctx.beginPath();
-    ctx.moveTo(x + w / 2, y + h * 0.35);
-    ctx.lineTo(x + w / 2 + Math.cos(a) * w * 0.45, y + h * 0.35 + Math.sin(a) * w * 0.45);
+    ctx.moveTo(lx, y + h - 4);
+    ctx.lineTo(lx, lancetTopY + lancetW * 0.5);
+    ctx.quadraticCurveTo(lx + lancetW * 0.5, lancetTopY - lancetW * 0.1, lx + lancetW, lancetTopY + lancetW * 0.5);
+    ctx.lineTo(lx + lancetW, y + h - 4);
+    ctx.closePath();
+    ctx.fill();
+
+    // Diamond panes inside the lancet (small, lead-grid leaded glass)
+    ctx.strokeStyle = 'rgba(20, 20, 35, 0.65)';
+    ctx.lineWidth = 0.8;
+    const paneH = 10;
+    for (let py2 = lancetTopY + lancetW * 0.6; py2 < y + h; py2 += paneH) {
+      ctx.beginPath();
+      ctx.moveTo(lx, py2);
+      ctx.lineTo(lx + lancetW * 0.5, py2 - paneH * 0.5);
+      ctx.lineTo(lx + lancetW, py2);
+      ctx.lineTo(lx + lancetW * 0.5, py2 + paneH * 0.5);
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    // 2-3 colored accents per lancet (small jewel-like tints, NOT full columns)
+    const accentColors = ['rgba(180, 50, 60, 0.55)', 'rgba(220, 180, 60, 0.55)', 'rgba(60, 140, 100, 0.50)'];
+    for (let ac = 0; ac < 3; ac++) {
+      const acSeed = ((li * 17 + ac * 31 + Math.floor(x * 0.13)) >>> 0) % 7;
+      if (acSeed > 3) continue; // ~half accents drawn
+      const accentColor = accentColors[acSeed % accentColors.length];
+      const ay = lancetTopY + lancetW * 0.6 + ac * (paneH * 2.5) + (acSeed * 3);
+      if (ay > y + h - paneH) continue;
+      ctx.fillStyle = accentColor;
+      ctx.beginPath();
+      ctx.moveTo(lx, ay);
+      ctx.lineTo(lx + lancetW * 0.5, ay - paneH * 0.5);
+      ctx.lineTo(lx + lancetW, ay);
+      ctx.lineTo(lx + lancetW * 0.5, ay + paneH * 0.5);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Lancet arch outline (thicker came)
+    ctx.strokeStyle = '#06060c';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(lx, y + h - 4);
+    ctx.lineTo(lx, lancetTopY + lancetW * 0.5);
+    ctx.quadraticCurveTo(lx + lancetW * 0.5, lancetTopY - lancetW * 0.1, lx + lancetW, lancetTopY + lancetW * 0.5);
+    ctx.lineTo(lx + lancetW, y + h - 4);
     ctx.stroke();
   }
+
+  // === Stone mullions (vertical bars BETWEEN lancets, drawn ON TOP) ===
+  ctx.fillStyle = '#1a1622';
+  for (let mi = 0; mi <= lancetCount; mi++) {
+    const mx = x + mi * (lancetW + lancetGap);
+    const mw = lancetGap;
+    ctx.fillRect(mx, lancetTopY, mw, y + h - lancetTopY);
+    // Tiny highlight on inside of mullion
+    ctx.fillStyle = '#3a3344';
+    ctx.fillRect(mx + 0.5, lancetTopY, 0.5, y + h - lancetTopY);
+    ctx.fillStyle = '#1a1622';
+  }
+
+  // === Trefoil rose at top of arch (decorative circle with 3-lobed shape) ===
+  const rcx = x + w / 2;
+  const rcy = y + w * 0.18;
+  const rR = w * 0.16;
+  // Glow halo around the rose
+  const roseGlow = ctx.createRadialGradient(rcx, rcy, 1, rcx, rcy, rR * 2.5);
+  roseGlow.addColorStop(0, 'rgba(255, 230, 180, 0.7)');
+  roseGlow.addColorStop(1, 'rgba(220, 160, 80, 0)');
+  ctx.fillStyle = roseGlow;
+  ctx.fillRect(rcx - rR * 2.5, rcy - rR * 2.5, rR * 5, rR * 5);
+  // Rose circle (golden)
+  ctx.fillStyle = 'rgba(255, 220, 140, 0.85)';
+  ctx.beginPath();
+  ctx.arc(rcx, rcy, rR, 0, TAU);
+  ctx.fill();
+  // 3-lobed inner trefoil
+  ctx.fillStyle = 'rgba(60, 80, 130, 0.85)';
+  for (let li = 0; li < 3; li++) {
+    const a = -Math.PI / 2 + (li / 3) * TAU;
+    ctx.beginPath();
+    ctx.arc(rcx + Math.cos(a) * rR * 0.45, rcy + Math.sin(a) * rR * 0.45, rR * 0.42, 0, TAU);
+    ctx.fill();
+  }
+  // Center bright dot
+  ctx.fillStyle = 'rgba(255, 240, 200, 0.95)';
+  ctx.beginPath();
+  ctx.arc(rcx, rcy, rR * 0.18, 0, TAU);
+  ctx.fill();
+  // Rose outer rim
+  ctx.strokeStyle = '#06060c';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.arc(rcx, rcy, rR, 0, TAU);
+  ctx.stroke();
 
   ctx.restore();
 
-  // === Leaded came (the lead strips between glass panes) ===
-  ctx.strokeStyle = '#08060c';
-  ctx.lineWidth = 1.5;
-  // Vertical mullions
-  for (let c = 1; c < cols; c++) {
-    const px = x + c * (w / cols);
-    ctx.beginPath();
-    ctx.moveTo(px, y + Math.max(0, (cols === 4 && c === 2) ? 0 : w * 0.5 * (1 - c / cols)));
-    ctx.lineTo(px, y + h);
-    ctx.stroke();
-  }
-  // Horizontal transoms
-  for (let r = 1; r < rows; r++) {
-    ctx.beginPath();
-    ctx.moveTo(x, y + r * (h / rows));
-    ctx.lineTo(x + w, y + r * (h / rows));
-    ctx.stroke();
-  }
-
-  // === Stone frame around the opening (the "cut" through the wall) ===
+  // === Stone frame around the opening ===
   // Outer arch trim (light stone)
   ctx.fillStyle = '#3a3344';
   ctx.beginPath();
@@ -2884,7 +2935,7 @@ function drawGothicWindow(x, y, w, h) {
   ctx.quadraticCurveTo(x + w / 2, y - w * 0.2, x - 4, y + w * 0.5);
   ctx.closePath();
   ctx.fill();
-  // Inner arch shadow (creates a real "carved" feel)
+  // Inner arch shadow
   ctx.strokeStyle = '#06040a';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -2899,7 +2950,7 @@ function drawGothicWindow(x, y, w, h) {
   ctx.fillRect(x - 8, y + w * 0.5, 1, h - w * 0.5);
   ctx.fillRect(x + w + 6, y + w * 0.5, 1, h - w * 0.5);
 
-  // Bottom stone sill (with shadow below)
+  // Bottom stone sill
   ctx.fillStyle = '#3a3344';
   ctx.fillRect(x - 12, y + h, w + 24, 6);
   ctx.fillStyle = '#5a5260';
@@ -2907,7 +2958,7 @@ function drawGothicWindow(x, y, w, h) {
   ctx.fillStyle = '#06040a';
   ctx.fillRect(x - 12, y + h + 6, w + 24, 2);
 
-  // Keystone at top of arch (carved trapezoid)
+  // Keystone at top of arch
   ctx.fillStyle = '#4a4458';
   ctx.beginPath();
   ctx.moveTo(x + w / 2 - 6, y - w * 0.18);
@@ -2917,12 +2968,11 @@ function drawGothicWindow(x, y, w, h) {
   ctx.closePath();
   ctx.fill();
 
-  // === Volumetric light shaft entering the room ===
-  // Beams that come down-and-in from the window, fading toward the floor.
+  // === Volumetric light shaft ===
   const shaft = ctx.createLinearGradient(x + w / 2, y + h * 0.4, x + w / 2 + 14, bandTop + 90);
-  shaft.addColorStop(0, 'rgba(220, 230, 255, 0.35)');
-  shaft.addColorStop(0.6, 'rgba(180, 200, 240, 0.12)');
-  shaft.addColorStop(1, 'rgba(160, 180, 220, 0)');
+  shaft.addColorStop(0, 'rgba(200, 220, 250, 0.28)');
+  shaft.addColorStop(0.6, 'rgba(160, 180, 220, 0.10)');
+  shaft.addColorStop(1, 'rgba(140, 160, 200, 0)');
   ctx.fillStyle = shaft;
   ctx.beginPath();
   ctx.moveTo(x - 4, y + h);
@@ -2934,15 +2984,15 @@ function drawGothicWindow(x, y, w, h) {
 
   // Wall glow halo
   const halo = ctx.createRadialGradient(x + w / 2, y + h / 2, 4, x + w / 2, y + h / 2, 90);
-  halo.addColorStop(0, 'rgba(180, 200, 240, 0.20)');
-  halo.addColorStop(1, 'rgba(160, 180, 220, 0)');
+  halo.addColorStop(0, 'rgba(160, 190, 230, 0.18)');
+  halo.addColorStop(1, 'rgba(140, 170, 210, 0)');
   ctx.fillStyle = halo;
   ctx.fillRect(x - 50, y - 30, w + 100, h + 80);
 
   // Dust motes drifting through the light shaft
   if (Math.random() < 0.04) {
     game.atmoParticles.push({
-      kind: 'paper', // reuse existing kind for simple particle draw
+      kind: 'paper',
       x: x + game.cameraX + rand(-w * 0.4, w * 0.4),
       y: y + rand(0, h * 0.4),
       vx: rand(-2, 6),
@@ -3580,63 +3630,104 @@ function drawPillar(x, biome) {
 function drawWallTorch(x, y, biome) {
   const flicker = Math.sin(game.t * 12 + x) * 0.2 + 0.8;
 
-  // MOUNTING BRACKET — triangle of stone fixed to the wall
-  ctx.fillStyle = '#1a1410';
+  // === Wall-mounted STONE CORBEL (architectural shelf jutting from the wall) ===
+  // Step pyramid that visibly grows OUT of the wall: top (widest, supports torch) → narrower steps → wall plane
+  // Top stone slab (the actual shelf the torch sits on)
+  ctx.fillStyle = '#2a2228';
+  ctx.fillRect(x - 14, y, 28, 5);
+  ctx.fillStyle = '#3a3038';
+  ctx.fillRect(x - 14, y, 28, 1); // bright top edge
+  ctx.fillStyle = '#0a0810';
+  ctx.fillRect(x - 14, y + 4, 28, 1); // bottom shadow line
+
+  // Mid step
+  ctx.fillStyle = '#1a161e';
   ctx.beginPath();
-  ctx.moveTo(x - 8, y + 4);
-  ctx.lineTo(x + 8, y + 4);
-  ctx.lineTo(x + 4, y + 14);
-  ctx.lineTo(x - 4, y + 14);
+  ctx.moveTo(x - 14, y + 5);
+  ctx.lineTo(x + 14, y + 5);
+  ctx.lineTo(x + 10, y + 12);
+  ctx.lineTo(x - 10, y + 12);
   ctx.closePath();
   ctx.fill();
-  // Bracket bolts (visible mounting points)
-  ctx.fillStyle = '#3a2a1a';
-  ctx.beginPath(); ctx.arc(x - 6, y + 6, 1.4, 0, TAU); ctx.fill();
-  ctx.beginPath(); ctx.arc(x + 6, y + 6, 1.4, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#2a2230';
+  ctx.fillRect(x - 14, y + 5, 28, 1);
 
-  // Torch shaft (wooden, sticks UP from the bracket)
+  // Lower step (anchored to wall)
+  ctx.fillStyle = '#0e0c14';
+  ctx.beginPath();
+  ctx.moveTo(x - 10, y + 12);
+  ctx.lineTo(x + 10, y + 12);
+  ctx.lineTo(x + 5, y + 18);
+  ctx.lineTo(x - 5, y + 18);
+  ctx.closePath();
+  ctx.fill();
+
+  // Mounting bolts on the top shelf
+  ctx.fillStyle = '#4a4048';
+  ctx.beginPath(); ctx.arc(x - 10, y + 2, 1.4, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 10, y + 2, 1.4, 0, TAU); ctx.fill();
+
+  // Shadow cast on the wall below the corbel
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + 22, 14, 4, 0, 0, TAU);
+  ctx.fill();
+
+  // === Iron sconce holding the torch (mounted onto the corbel top) ===
+  // Brazier base — sits ON the corbel
+  ctx.fillStyle = '#1a1410';
+  ctx.fillRect(x - 6, y - 4, 12, 5);
+  ctx.fillStyle = '#2a1c14';
+  ctx.fillRect(x - 6, y - 4, 12, 1);
+
+  // Torch shaft (wooden) sticking UP from the brazier
   ctx.fillStyle = '#2a1808';
-  ctx.fillRect(x - 2.5, y - 12, 5, 18);
+  ctx.fillRect(x - 2.5, y - 14, 5, 11);
   ctx.fillStyle = '#3a2410';
-  ctx.fillRect(x - 2.5, y - 12, 5, 1);
-  ctx.fillRect(x - 2.5, y, 5, 1);
+  ctx.fillRect(x - 2.5, y - 14, 5, 1);
+  // Wrap band
+  ctx.fillStyle = '#0a0408';
+  ctx.fillRect(x - 3, y - 9, 6, 1.2);
 
-  // Iron cup / brazier on top
+  // Iron cup / brazier top
   ctx.fillStyle = '#1a1410';
   ctx.beginPath();
-  ctx.moveTo(x - 5, y - 12);
-  ctx.lineTo(x + 5, y - 12);
-  ctx.lineTo(x + 3, y - 18);
-  ctx.lineTo(x - 3, y - 18);
+  ctx.moveTo(x - 5, y - 14);
+  ctx.lineTo(x + 5, y - 14);
+  ctx.lineTo(x + 3, y - 20);
+  ctx.lineTo(x - 3, y - 20);
   ctx.closePath();
   ctx.fill();
+  ctx.fillStyle = '#3a2a1c';
+  ctx.fillRect(x - 5, y - 14, 10, 1);
 
-  // Flame
-  const grad = ctx.createRadialGradient(x, y - 22, 1, x, y - 22, 22);
+  // === Flame ===
+  const grad = ctx.createRadialGradient(x, y - 24, 1, x, y - 24, 24);
   grad.addColorStop(0, biome.torchFlame[0] + flicker + ')');
   grad.addColorStop(0.4, biome.torchFlame[1] + (flicker * 0.8) + ')');
   grad.addColorStop(1, biome.torchFlame[2]);
   ctx.fillStyle = grad;
   ctx.beginPath();
-  ctx.arc(x, y - 22, 22, 0, TAU);
+  ctx.arc(x, y - 24, 24, 0, TAU);
   ctx.fill();
   // Flame core
   ctx.fillStyle = biome.torchCore + flicker + ')';
   ctx.beginPath();
-  ctx.ellipse(x, y - 22, 3, 7, 0, 0, TAU);
+  ctx.ellipse(x, y - 24, 3, 7, 0, 0, TAU);
   ctx.fill();
-  // Pool of warm light on the wall around the torch
-  const wallGlow = ctx.createRadialGradient(x, y - 8, 4, x, y - 8, 70);
-  wallGlow.addColorStop(0, biome.torchFlame[0] + (flicker * 0.18) + ')');
+
+  // Pool of warm light on the wall (smaller so the corbel stays visible)
+  const wallGlow = ctx.createRadialGradient(x, y - 12, 4, x, y - 12, 55);
+  wallGlow.addColorStop(0, biome.torchFlame[0] + (flicker * 0.15) + ')');
   wallGlow.addColorStop(1, biome.torchFlame[2]);
   ctx.fillStyle = wallGlow;
-  ctx.fillRect(x - 70, y - 60, 140, 90);
+  ctx.fillRect(x - 55, y - 50, 110, 70);
 
   // Occasional spark drifting up
   if (Math.random() < 0.10) {
     game.embers.push({
       x: x + game.cameraX + rand(-3, 3),
-      y: y - 22,
+      y: y - 24,
       vx: rand(-6, 6),
       vy: rand(-50, -25),
       life: rand(1, 2), maxLife: 2,
