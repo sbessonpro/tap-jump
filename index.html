@@ -10,6 +10,8 @@
 <body>
   <div id="game-container">
     <canvas id="game"></canvas>
+    <div id="low-hp-vignette"></div>
+    <div id="flash-fx"></div>
 
     <!-- HUD -->
     <div id="hud">
@@ -27,6 +29,19 @@
           <button id="shop-btn" class="hud-btn">🏪 Boutique</button>
         </div>
       </div>
+    </div>
+
+    <!-- Combo counter -->
+    <div id="combo-hud">
+      <div id="combo-num">x2</div>
+      <div id="combo-label">COMBO</div>
+      <div id="combo-bar"><div id="combo-bar-fill"></div></div>
+    </div>
+
+    <!-- Boss approach warning -->
+    <div id="boss-warning">
+      <span class="warn-icon">⚠</span>
+      <span class="warn-text">PRÉSENCE MENAÇANTE</span>
     </div>
 
     <!-- Boss bar -->

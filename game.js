@@ -46,6 +46,12 @@ const forgeClose = document.getElementById('forge-close');
 const forgeList = document.getElementById('forge-list');
 const forgeEssenceEl = document.getElementById('forge-essence');
 const essenceCountEl = document.getElementById('essence-count');
+const comboHud = document.getElementById('combo-hud');
+const comboNumEl = document.getElementById('combo-num');
+const comboBarFill = document.getElementById('combo-bar-fill');
+const bossWarningEl = document.getElementById('boss-warning');
+const lowHpVignette = document.getElementById('low-hp-vignette');
+const flashFxEl = document.getElementById('flash-fx');
 
 let W = 0, H = 0;
 const DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -168,6 +174,9 @@ const audio = (() => {
     click()    { tone({ freq: 700, duration: 0.04, volume: 0.18, type: 'square' }); },
     purchase() { tone({ freq: 800, duration: 0.07, volume: 0.20, type: 'sine' }); tone({ freq: 1200, duration: 0.10, volume: 0.16, type: 'sine', delay: 0.06 }); },
     levelUp()  { tone({ freq: 600, duration: 0.10, volume: 0.30, type: 'triangle' }); tone({ freq: 900, duration: 0.10, volume: 0.30, type: 'triangle', delay: 0.08 }); tone({ freq: 1300, duration: 0.18, volume: 0.30, type: 'triangle', delay: 0.18 }); },
+    bossWarn() { tone({ freq: 110, sweepTo: 70, duration: 0.45, volume: 0.30, type: 'sawtooth' }); tone({ freq: 220, duration: 0.45, volume: 0.20, type: 'square', delay: 0.05 }); },
+    comboBreak(){ tone({ freq: 320, sweepTo: 90, duration: 0.30, volume: 0.20, type: 'sawtooth' }); },
+    chestOpen(){ tone({ freq: 880, duration: 0.10, volume: 0.25, type: 'triangle' }); tone({ freq: 1320, duration: 0.10, volume: 0.20, type: 'triangle', delay: 0.06 }); tone({ freq: 1760, duration: 0.16, volume: 0.18, type: 'sine', delay: 0.12 }); },
   };
 })();
 
@@ -396,6 +405,18 @@ const game = {
   challengeMode: false,      // disables auto-scroll, ×1.5 coins
   pauseFromMenu: false,      // pause triggered by pause button (vs shop)
   bossesDefeated: 0,
+  // Combo system
+  combo: 0,
+  comboTimer: 0,
+  comboBest: 0,
+  // Game feel
+  hitstop: 0,                // freezes update for that many seconds
+  flashFx: 0,                // full-screen flash (white) intensity
+  bossWarning: 0,            // pulse intensity when boss is near
+  bossWarned: false,
+  // Chest event
+  chestSpawnedAt: 0,
+  chest: null,
   unlockedWeapons: null,     // Set, set in startGame
   upgrades: {
     damageMul: 1,
@@ -762,28 +783,57 @@ function damageEnemy(e, dmg, knockback, source) {
     });
     return;
   }
+  // Critical hits: 10% base chance, ×2 damage
+  const isCrit = Math.random() < 0.10;
+  if (isCrit) dmg *= 2;
+
   e.hp -= dmg;
   e.flash = 0.15;
   e.knockback = Math.abs(knockback) * (e.isBoss ? 0.25 : 1);
   e.knockbackDir = Math.sign(knockback) || 1;
   game.damageNums.push({
-    x: e.x, y: e.y - e.h * 0.65,
-    vy: -70,
-    text: '' + Math.round(dmg),
-    life: 0.7, maxLife: 0.7,
-    color: dmg >= 50 ? '#ffcc40' : '#ff7070',
+    x: e.x + rand(-8, 8), y: e.y - e.h * 0.65,
+    vy: -90 - (isCrit ? 30 : 0),
+    text: (isCrit ? '✦' : '') + Math.round(dmg),
+    life: isCrit ? 0.9 : 0.7, maxLife: isCrit ? 0.9 : 0.7,
+    color: isCrit ? '#ffd040' : (dmg >= 50 ? '#ffcc40' : '#ff7070'),
+    big: isCrit || dmg >= 50,
+    crit: isCrit,
   });
-  if (dmg >= 50 || e.isBoss) audio.hitBig(); else audio.hit();
+  if (isCrit) {
+    // Crit sparkle particles
+    for (let i = 0; i < 8; i++) {
+      const a = rand(0, TAU);
+      game.particles.push({
+        x: e.x, y: e.y - e.h * 0.5,
+        vx: Math.cos(a) * rand(120, 220),
+        vy: Math.sin(a) * rand(120, 220),
+        life: 0.45, maxLife: 0.45,
+        color: '#fff0a0', size: 2.5,
+      });
+    }
+    game.shake = Math.max(game.shake, 8);
+  }
+  if (dmg >= 50 || e.isBoss || isCrit) audio.hitBig(); else audio.hit();
   if (e.hp <= 0 && !e.dead) {
     e.dead = true;
     e.deathTimer = e.isBoss ? 1.2 : 0.4;
     game.kills += 1;
     killsEl.textContent = '☠ ' + game.kills;
+    // Combo: increment on kill, refresh timer
+    game.combo += 1;
+    game.comboTimer = 3.0;
+    if (game.combo > game.comboBest) game.comboBest = game.combo;
+    refreshComboUI();
+    // Hit-stop for game feel (longer for bosses/crit kills)
+    game.hitstop = Math.max(game.hitstop, e.isBoss ? 0.12 : (isCrit ? 0.06 : 0.035));
     spawnDeathParticles(e);
     if (e.isBoss) audio.bossDie(); else audio.enemyDie();
     let [lo, hi] = e.type.coinDrop;
     if (e.elite) { lo = Math.round(lo * 1.8); hi = Math.round(hi * 1.8); }
-    const n = Math.floor(rand(lo, hi + 1));
+    // Combo coin bonus: ×1 / ×1.25 / ×1.5 / ×2 at thresholds 5/10/20
+    const comboMul = game.combo >= 20 ? 2 : (game.combo >= 10 ? 1.5 : (game.combo >= 5 ? 1.25 : 1));
+    const n = Math.floor(rand(lo, hi + 1) * comboMul);
     for (let i = 0; i < n; i++) spawnCoin(e);
     if (e.isBoss) onBossDefeated(e);
   }
@@ -884,6 +934,154 @@ function updatePickups(dt) {
   game.pickups = game.pickups.filter(c => c.life > 0);
 }
 
+// ============ Chest event ============
+function maybeSpawnChest() {
+  if (game.bossActive) return;
+  if (game.chest) return;
+  const meters = game.cameraX / 50;
+  const sinceLast = meters - game.chestSpawnedAt;
+  // After 100m from last chest, and not within 60m of next boss
+  if (sinceLast < 100) return;
+  if (game.bossNextAt - meters < 60) return;
+  if (Math.random() < 0.0009) {
+    const cx = game.cameraX + W + rand(180, 320);
+    game.chest = {
+      x: cx,
+      y: (bandTop + bandBot) / 2 + 16,
+      opened: false,
+      openTimer: 0,
+      pulse: 0,
+    };
+    game.chestSpawnedAt = meters;
+  }
+}
+
+function updateChest(dt) {
+  maybeSpawnChest();
+  if (!game.chest) return;
+  const ch = game.chest;
+  ch.pulse += dt * 3;
+  if (!ch.opened) {
+    const p = game.player;
+    const dx = p.x - ch.x;
+    const dy = p.y - ch.y;
+    if (dx * dx + dy * dy < 40 * 40) {
+      ch.opened = true;
+      ch.openTimer = 1.6;
+      // Burst rewards: coins, hp, essence shimmer
+      const coinN = 18 + Math.floor(rand(8, 18));
+      for (let i = 0; i < coinN; i++) {
+        game.pickups.push({
+          kind: 'coin',
+          x: ch.x + rand(-8, 8), y: ch.y - 8,
+          vx: rand(-280, 280),
+          vy: rand(-420, -240),
+          onGround: false, groundY: ch.y + 4,
+          life: 20, spin: rand(0, TAU), spinVel: rand(4, 9), magnet: false,
+        });
+      }
+      // Heal partial
+      const heal = Math.round(p.maxHp * 0.35);
+      p.hp = Math.min(p.maxHp, p.hp + heal);
+      refreshHpUI();
+      game.damageNums.push({
+        x: ch.x, y: ch.y - 30, vy: -90,
+        text: '+' + heal + ' PV',
+        life: 1.4, maxLife: 1.4,
+        color: '#80ffaa', big: true,
+      });
+      // Sparkle particles
+      for (let i = 0; i < 30; i++) {
+        const a = rand(0, TAU);
+        const sp = rand(120, 320);
+        game.particles.push({
+          x: ch.x, y: ch.y - 12,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 80,
+          life: 0.9, maxLife: 0.9,
+          color: i % 3 === 0 ? '#ffe080' : (i % 3 === 1 ? '#fff0c0' : '#80ffaa'),
+          size: 3,
+        });
+      }
+      game.flashFx = 0.4;
+      audio.chestOpen && audio.chestOpen();
+    }
+  } else {
+    ch.openTimer -= dt;
+    if (ch.openTimer <= 0) game.chest = null;
+  }
+  // Despawn if far behind
+  if (ch && ch.x < game.cameraX - 200) game.chest = null;
+}
+
+function drawChest() {
+  if (!game.chest) return;
+  const ch = game.chest;
+  const x = sX(ch.x);
+  const y = ch.y;
+  // Ground shadow
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + 8, 28, 6, 0, 0, TAU);
+  ctx.fill();
+  // Glow halo
+  const pulse = 0.5 + Math.sin(ch.pulse) * 0.3;
+  const glow = ctx.createRadialGradient(x, y - 6, 4, x, y - 6, 60);
+  glow.addColorStop(0, `rgba(255, 220, 100, ${0.6 * pulse})`);
+  glow.addColorStop(1, 'rgba(255, 200, 80, 0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(x - 60, y - 60, 120, 80);
+  // Chest body
+  ctx.fillStyle = '#3a2614';
+  roundRect(x - 22, y - 18, 44, 26, 3);
+  ctx.fill();
+  ctx.strokeStyle = '#1a0e06';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // Iron bands
+  ctx.fillStyle = '#1a1208';
+  ctx.fillRect(x - 22, y - 8, 44, 3);
+  ctx.fillRect(x - 22, y + 4, 44, 3);
+  // Chest lid (lifts when opened)
+  ctx.save();
+  ctx.translate(x, y - 18);
+  if (ch.opened) ctx.rotate(-Math.min(1.2, (1.6 - ch.openTimer) * 1.5));
+  ctx.fillStyle = '#4a3018';
+  ctx.beginPath();
+  ctx.moveTo(-22, 0);
+  ctx.quadraticCurveTo(0, -16, 22, 0);
+  ctx.lineTo(22, 4);
+  ctx.lineTo(-22, 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#1a0e06';
+  ctx.stroke();
+  // Lock
+  if (!ch.opened) {
+    ctx.fillStyle = '#d4a040';
+    ctx.fillRect(-4, -4, 8, 8);
+    ctx.fillStyle = '#1a0e06';
+    ctx.fillRect(-1, -1, 2, 4);
+  }
+  ctx.restore();
+  // Inner glow when opened
+  if (ch.opened) {
+    const innerGlow = ctx.createRadialGradient(x, y - 12, 1, x, y - 12, 30);
+    innerGlow.addColorStop(0, `rgba(255, 240, 180, ${ch.openTimer * 0.6})`);
+    innerGlow.addColorStop(1, 'rgba(255, 200, 80, 0)');
+    ctx.fillStyle = innerGlow;
+    ctx.fillRect(x - 30, y - 40, 60, 40);
+  }
+  // Sparkle on top
+  if (!ch.opened) {
+    const sx = x + Math.cos(ch.pulse * 2) * 16;
+    const sy = y - 30 + Math.sin(ch.pulse * 3) * 4;
+    ctx.fillStyle = `rgba(255, 240, 180, ${pulse})`;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 2, 0, TAU);
+    ctx.fill();
+  }
+}
+
 function updateEmbers(dt) {
   if (Math.random() < dt * 8) {
     game.embers.push({
@@ -938,6 +1136,13 @@ function triggerBossSpawn() {
   bossHpEl.style.width = '100%';
   bossBar.classList.add('visible');
   audio.bossSpawn();
+  // Lock camera at this point (used by render/update bounds)
+  game.bossArenaX = game.cameraX;
+  // Big spawn flash & shake
+  game.flashFx = 0.5;
+  game.shake = Math.max(game.shake, 14);
+  game.bossWarning = 0;
+  game.bossWarned = false;
 }
 
 function onBossDefeated(boss) {
@@ -945,9 +1150,27 @@ function onBossDefeated(boss) {
   game.boss = null;
   game.bossesDefeated += 1;
   game.stage += 1;
+  game.bossWarning = 0;
+  game.bossWarned = false;
   // Next boss further away
   game.bossNextAt = Math.floor(game.cameraX / 50) + 250;
   bossBar.classList.remove('visible');
+  // Victory flash + shake
+  game.flashFx = 0.7;
+  game.shake = Math.max(game.shake, 20);
+  // Bonus heal on stage clear (25% maxHp)
+  const p = game.player;
+  if (p && p.hp > 0) {
+    const heal = Math.round(p.maxHp * 0.25);
+    p.hp = Math.min(p.maxHp, p.hp + heal);
+    refreshHpUI();
+    game.damageNums.push({
+      x: p.x, y: p.y - p.h * 0.8, vy: -100,
+      text: '+' + heal + ' PV',
+      life: 1.5, maxLife: 1.5,
+      color: '#80ffaa', big: true,
+    });
+  }
   const biome = getBiome();
   stageEl.textContent = `Étage ${game.stage} · ${biome.name}`;
 
@@ -1701,8 +1924,43 @@ function buyItem(item) {
 
 function refreshHpUI() {
   const p = game.player;
-  hpBar.style.width = clamp((p.hp / p.maxHp) * 100, 0, 100) + '%';
+  const ratio = clamp(p.hp / p.maxHp, 0, 1);
+  hpBar.style.width = (ratio * 100) + '%';
   hpText.textContent = Math.max(0, Math.round(p.hp)) + '/' + p.maxHp;
+  if (lowHpVignette) {
+    if (ratio < 0.3 && game.running) lowHpVignette.classList.add('visible');
+    else lowHpVignette.classList.remove('visible');
+  }
+}
+
+function refreshComboUI() {
+  if (!comboHud) return;
+  if (game.combo < 2) {
+    comboHud.classList.remove('visible', 'hot', 'fire');
+    return;
+  }
+  comboHud.classList.add('visible');
+  comboHud.classList.toggle('hot', game.combo >= 5 && game.combo < 15);
+  comboHud.classList.toggle('fire', game.combo >= 15);
+  comboNumEl.textContent = 'x' + game.combo;
+}
+
+function updateComboBar() {
+  if (!comboBarFill) return;
+  if (game.combo >= 2) {
+    comboBarFill.style.width = clamp((game.comboTimer / 3.0) * 100, 0, 100) + '%';
+  }
+}
+
+function updateBossWarningUI() {
+  if (!bossWarningEl) return;
+  if (game.bossWarning > 0.3 && !game.bossActive) bossWarningEl.classList.add('visible');
+  else bossWarningEl.classList.remove('visible');
+}
+
+function updateFlashFxUI() {
+  if (!flashFxEl) return;
+  flashFxEl.style.opacity = game.flashFx > 0 ? Math.min(0.6, game.flashFx) : 0;
 }
 
 shopBtn.addEventListener('click', toggleShop);
@@ -1711,12 +1969,23 @@ shopClose.addEventListener('click', closeShop);
 // ============ Main loop ============
 let lastT = 0;
 function loop(t) {
-  const dt = Math.min(0.033, (t - lastT) / 1000);
+  const rawDt = Math.min(0.033, (t - lastT) / 1000);
   lastT = t;
-  game.t += dt;
+  game.t += rawDt;
 
-  if (game.running && !game.paused) update(dt);
-  render(dt);
+  if (game.running && !game.paused) {
+    // Hit-stop: if active, freeze gameplay update (keep rendering for FX)
+    if (game.hitstop > 0) {
+      game.hitstop -= rawDt;
+    } else {
+      update(rawDt);
+    }
+  }
+  if (game.flashFx > 0) game.flashFx = Math.max(0, game.flashFx - rawDt * 4);
+  render(rawDt);
+  updateComboBar();
+  updateBossWarningUI();
+  updateFlashFxUI();
 
   requestAnimationFrame(loop);
 }
@@ -1977,6 +2246,34 @@ function update(dt) {
   maybeSpawnProp();
   updateProps();
   updateAtmosphere(dt);
+  updateChest(dt);
+
+  // Combo timer decay
+  if (game.combo > 0) {
+    game.comboTimer -= dt;
+    if (game.comboTimer <= 0) {
+      if (game.combo >= 5) audio.coin && audio.comboBreak && audio.comboBreak();
+      game.combo = 0;
+      refreshComboUI();
+    }
+  }
+
+  // Boss approach warning (50m before)
+  if (!game.bossActive) {
+    const meters = game.cameraX / 50;
+    const dist = game.bossNextAt - meters;
+    if (dist > 0 && dist <= 50) {
+      game.bossWarning = 1 - dist / 50;
+      if (!game.bossWarned && dist < 35) {
+        game.bossWarned = true;
+        audio.bossWarn && audio.bossWarn();
+      }
+    } else {
+      game.bossWarning *= Math.max(0, 1 - dt * 4);
+    }
+  } else {
+    game.bossWarning *= Math.max(0, 1 - dt * 4);
+  }
 
   if (game.shake > 0) game.shake = Math.max(0, game.shake - dt * 40);
 }
@@ -2011,6 +2308,7 @@ function render(dt) {
     const all = [];
     for (const e of game.enemies) all.push({ y: e.y, draw: () => drawEnemy(e) });
     for (const c of game.pickups) all.push({ y: c.y, draw: () => drawCoin(c) });
+    if (game.chest) all.push({ y: game.chest.y, draw: () => drawChest() });
     all.push({ y: game.player.y, draw: () => drawPlayer() });
     all.sort((a, b) => a.y - b.y);
     for (const item of all) item.draw();
@@ -2281,7 +2579,7 @@ function drawCrystalCluster(x, baseY, variant) {
     { rgb: '128, 192, 255' },
     { rgb: '192, 128, 255' },
     { rgb: '120, 255, 200' },
-  ][variant % 3];
+  ][((variant % 3) + 3) % 3];
   const pulse = 0.5 + Math.sin(game.t * 2 + x * 0.03) * 0.3;
   // Outer glow
   const glow = ctx.createRadialGradient(x, baseY - 14, 1, x, baseY - 14, 50);
@@ -3238,22 +3536,35 @@ function drawPlayer() {
   const blink = p.invuln > 0 && Math.floor(p.invuln * 20) % 2 === 0;
   if (blink) return;
 
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  // Ground shadow (wider when attacking — feet planted)
+  const shadowR = p.attackTimer > 0 ? 26 : 22;
+  const sg = ctx.createRadialGradient(x, y + 4, 2, x, y + 4, shadowR + 4);
+  sg.addColorStop(0, 'rgba(0, 0, 0, 0.65)');
+  sg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = sg;
   ctx.beginPath();
-  ctx.ellipse(x, y + 4, 22, 6, 0, 0, TAU);
+  ctx.ellipse(x, y + 4, shadowR, 6.5, 0, 0, TAU);
   ctx.fill();
 
+  // Dark aura behind hero (pulsing red wisps)
+  drawDarkAura(p, x, y);
+
   const walk = p.moving ? Math.sin(p.walkPhase) : 0;
-  const bob = p.moving ? Math.abs(walk) * 2 : 0;
+  // Walk bob + idle breathing
+  const bob = p.moving ? Math.abs(walk) * 2 : (Math.sin(game.t * 1.6) * 0.7);
 
   ctx.save();
   ctx.translate(x, y - bob);
+  // Back attachment (sheathed dagger / scabbard silhouette)
+  drawBackBlade(p);
   drawCape(p, walk);
   drawLegs(p, walk);
   drawArmor(p);
+  drawArm(p);            // off-hand arm with gauntlet
   drawPauldrons(p);
   drawHelm(p, walk);
   drawPlayerWeapon(p);
+
   // Ring glow on hand (only if equipped)
   const eq = getEquipPalette();
   if (eq.ringRGB) {
@@ -3266,59 +3577,242 @@ function drawPlayer() {
     glow.addColorStop(1, `rgba(${eq.ringRGB}, 0)`);
     ctx.fillStyle = glow;
     ctx.fillRect(handX - 14, handY - 14, 28, 28);
-    // tiny gem dot
     ctx.fillStyle = eq.ringHand;
     ctx.beginPath();
     ctx.arc(handX, handY, 1.6, 0, TAU);
     ctx.fill();
   }
   ctx.restore();
+
+  // Speed lines / dark wisps when running (outside translate)
+  if (p.moving && Math.random() < 0.35) {
+    game.particles.push({
+      x: p.x - p.facing * rand(8, 18),
+      y: p.y - rand(8, p.h * 0.7),
+      vx: -p.facing * rand(20, 60),
+      vy: rand(-20, -5),
+      life: 0.35, maxLife: 0.35,
+      color: 'rgba(120, 20, 30, 0.7)',
+      size: 2.2,
+    });
+  }
+}
+
+function drawDarkAura(p, x, y) {
+  // Subtle red mist around the lower body — gives "presence"
+  const pulse = 0.6 + Math.sin(game.t * 2.2) * 0.25;
+  const grad = ctx.createRadialGradient(x, y - p.h * 0.35, 4, x, y - p.h * 0.35, 44);
+  grad.addColorStop(0, `rgba(140, 20, 30, ${0.20 * pulse})`);
+  grad.addColorStop(0.6, `rgba(80, 10, 20, ${0.10 * pulse})`);
+  grad.addColorStop(1, 'rgba(40, 0, 10, 0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.ellipse(x, y - p.h * 0.35, 30, 50, 0, 0, TAU);
+  ctx.fill();
+}
+
+function drawBackBlade(p) {
+  // Sheathed secondary blade on back (visible behind shoulder, opposite-facing)
+  const sx = -p.facing * 6;
+  const top = -p.h + 4;
+  ctx.save();
+  ctx.translate(sx, top + 16);
+  ctx.rotate(-p.facing * 0.4);
+  // Pommel
+  ctx.fillStyle = '#3a2410';
+  ctx.fillRect(-3, -2, 6, 5);
+  ctx.fillStyle = '#aa7028';
+  ctx.beginPath(); ctx.arc(0, -3, 2.2, 0, TAU); ctx.fill();
+  // Scabbard
+  ctx.fillStyle = '#1a0a08';
+  ctx.fillRect(-2.5, 3, 5, 22);
+  ctx.fillStyle = '#3a2010';
+  ctx.fillRect(-2.5, 8, 5, 1);
+  ctx.fillRect(-2.5, 16, 5, 1);
+  ctx.restore();
 }
 
 function drawCape(p, walk) {
-  const sway = walk * 4;
-  ctx.fillStyle = p.flash > 0 ? '#ffaaaa' : '#7a1a1a';
+  const sway = walk * 4 + Math.sin(game.t * 2.5) * 1.5;
+  const f = -p.facing;
+
+  // Outer dark layer (almost black)
+  ctx.fillStyle = p.flash > 0 ? '#ffaaaa' : '#1a0608';
   ctx.beginPath();
-  ctx.moveTo(-p.facing * 8, -p.h * 0.85);
-  ctx.quadraticCurveTo(-p.facing * 26 + sway, -p.h * 0.4, -p.facing * 22 + sway, -p.h * 0.05);
-  ctx.lineTo(-p.facing * 14 + sway, -p.h * 0.05);
-  ctx.quadraticCurveTo(-p.facing * 16, -p.h * 0.4, -p.facing * 4, -p.h * 0.85);
+  ctx.moveTo(f * 9, -p.h * 0.86);
+  ctx.quadraticCurveTo(f * 30 + sway, -p.h * 0.4, f * 26 + sway * 1.2, -p.h * 0.02);
+  // Torn bottom edge (zigzag)
+  ctx.lineTo(f * 22 + sway, -p.h * 0.08);
+  ctx.lineTo(f * 19 + sway, -p.h * 0.02);
+  ctx.lineTo(f * 15 + sway, -p.h * 0.10);
+  ctx.lineTo(f * 12 + sway, -p.h * 0.03);
+  ctx.lineTo(f * 9 + sway, -p.h * 0.09);
+  ctx.lineTo(f * 5, -p.h * 0.04);
+  ctx.quadraticCurveTo(f * 16, -p.h * 0.4, f * 5, -p.h * 0.86);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = p.flash > 0 ? '#ffd0d0' : '#a02020';
+
+  // Mid layer (deep red)
+  ctx.fillStyle = p.flash > 0 ? '#ffd0d0' : '#7a1a1a';
   ctx.beginPath();
-  ctx.moveTo(-p.facing * 6, -p.h * 0.82);
-  ctx.quadraticCurveTo(-p.facing * 14 + sway, -p.h * 0.4, -p.facing * 12 + sway, -p.h * 0.1);
-  ctx.lineTo(-p.facing * 8 + sway, -p.h * 0.1);
-  ctx.quadraticCurveTo(-p.facing * 10, -p.h * 0.4, -p.facing * 2, -p.h * 0.82);
+  ctx.moveTo(f * 7, -p.h * 0.84);
+  ctx.quadraticCurveTo(f * 24 + sway, -p.h * 0.4, f * 22 + sway, -p.h * 0.08);
+  ctx.lineTo(f * 19 + sway, -p.h * 0.12);
+  ctx.lineTo(f * 15 + sway, -p.h * 0.15);
+  ctx.lineTo(f * 11 + sway, -p.h * 0.10);
+  ctx.lineTo(f * 5, -p.h * 0.10);
+  ctx.quadraticCurveTo(f * 14, -p.h * 0.4, f * 4, -p.h * 0.84);
   ctx.closePath();
+  ctx.fill();
+
+  // Highlight (brighter red, narrow strip)
+  ctx.fillStyle = p.flash > 0 ? '#ffe8e8' : '#b03030';
+  ctx.beginPath();
+  ctx.moveTo(f * 5, -p.h * 0.82);
+  ctx.quadraticCurveTo(f * 16 + sway, -p.h * 0.4, f * 14 + sway, -p.h * 0.15);
+  ctx.lineTo(f * 9 + sway, -p.h * 0.20);
+  ctx.lineTo(f * 4, -p.h * 0.18);
+  ctx.quadraticCurveTo(f * 10, -p.h * 0.4, f * 2, -p.h * 0.82);
+  ctx.closePath();
+  ctx.fill();
+
+  // Cape clasp at shoulder (chain link)
+  ctx.fillStyle = p.flash > 0 ? '#fff' : '#8a6020';
+  ctx.beginPath();
+  ctx.arc(f * 8, -p.h * 0.85, 2.2, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#3a2008';
+  ctx.beginPath();
+  ctx.arc(f * 8, -p.h * 0.85, 1, 0, TAU);
   ctx.fill();
 }
 
 function drawLegs(p, walk) {
   const legW = 9, legH = 22;
   const offset = walk * 5;
+  const eq = getEquipPalette();
+  const flash = p.flash > 0;
+
+  // Back leg (drawn first, behind)
+  drawSingleLeg(p, -legW - 4, -legH - 4 + offset, legW, legH, eq, flash, 0.85);
+  // Front leg (full color)
+  drawSingleLeg(p, 4, -legH - 4 - offset, legW, legH, eq, flash, 1.0);
+}
+
+function drawSingleLeg(p, lx, ly, lw, lh, eq, flash, shadeMul) {
+  // Cloth pants (dark)
+  ctx.fillStyle = flash ? '#ffaaaa' : (shadeMul < 1 ? '#10101a' : '#15151c');
+  ctx.fillRect(lx, ly, lw, lh);
+
+  // Thigh plate (top half, metallic)
+  const plateGrad = ctx.createLinearGradient(0, ly, 0, ly + lh * 0.55);
+  plateGrad.addColorStop(0, flash ? '#fff' : eq.armorMid);
+  plateGrad.addColorStop(1, flash ? '#ffaaaa' : '#08080e');
+  ctx.fillStyle = plateGrad;
+  ctx.fillRect(lx, ly + 2, lw, lh * 0.5);
+
+  // Knee guard (rounded plate)
+  ctx.fillStyle = flash ? '#fff' : eq.armorBase;
+  ctx.beginPath();
+  ctx.ellipse(lx + lw / 2, ly + lh * 0.55, lw * 0.6, 4, 0, 0, TAU);
+  ctx.fill();
+  // Knee spike (small)
+  ctx.fillStyle = flash ? '#ffd0d0' : eq.armorAccent;
+  ctx.beginPath();
+  ctx.moveTo(lx + lw / 2 - 2, ly + lh * 0.55);
+  ctx.lineTo(lx + lw / 2, ly + lh * 0.55 - 4);
+  ctx.lineTo(lx + lw / 2 + 2, ly + lh * 0.55);
+  ctx.closePath();
+  ctx.fill();
+
+  // Boot (armored, wider at toe in facing dir)
+  const bootY = ly + lh - 6;
+  ctx.fillStyle = flash ? '#ffaaaa' : '#0a0a10';
+  ctx.fillRect(lx - 1, bootY, lw + 2 + (p.facing > 0 ? 3 : 0) * (lx > 0 ? 1 : 0), 6);
+  // Buckle strap on boot
+  ctx.fillStyle = flash ? '#ffd0d0' : eq.armorBelt;
+  ctx.fillRect(lx, bootY + 1, lw, 1.5);
+}
+
+function drawArm(p) {
+  // Off-hand arm hanging at side (or holding shield-side)
+  const eq = getEquipPalette();
+  const armX = -p.facing * 12;
+  const top = -p.h + 22;
+  const swing = p.moving ? Math.sin(p.walkPhase + Math.PI) * 4 : Math.sin(game.t * 1.6) * 0.6;
+
+  // Upper arm
   ctx.fillStyle = p.flash > 0 ? '#ffaaaa' : '#15151c';
-  ctx.fillRect(-legW - 4, -legH - 4 + offset, legW, legH);
-  ctx.fillRect(4, -legH - 4 - offset, legW, legH);
-  ctx.fillStyle = p.flash > 0 ? '#ffaaaa' : '#0a0a10';
-  ctx.fillRect(-legW - 5, -6 + Math.max(0, offset), legW + 2, 6);
-  ctx.fillRect(3, -6 + Math.max(0, -offset), legW + 2, 6);
+  ctx.fillRect(armX - 3, top, 6, 18);
+  // Shoulder pad (lighter)
+  ctx.fillStyle = p.flash > 0 ? '#fff' : eq.armorMid;
+  ctx.beginPath();
+  ctx.ellipse(armX, top + 1, 5, 4, 0, 0, TAU);
+  ctx.fill();
+  // Forearm with gauntlet (segmented)
+  const faTop = top + 16 + swing * 0.4;
+  ctx.fillStyle = p.flash > 0 ? '#ffaaaa' : eq.armorBase;
+  ctx.fillRect(armX - 3.5, faTop, 7, 12);
+  // Gauntlet segments (3 horizontal lines)
+  ctx.fillStyle = p.flash > 0 ? '#ffd0d0' : '#0a0a10';
+  ctx.fillRect(armX - 3.5, faTop + 3, 7, 0.8);
+  ctx.fillRect(armX - 3.5, faTop + 7, 7, 0.8);
+  // Knuckle spikes
+  if (eq.armor >= 2) {
+    ctx.fillStyle = eq.armorAccent;
+    for (let i = -1; i <= 1; i++) {
+      ctx.beginPath();
+      ctx.moveTo(armX + i * 1.8 - 0.8, faTop + 11);
+      ctx.lineTo(armX + i * 1.8, faTop + 13.5);
+      ctx.lineTo(armX + i * 1.8 + 0.8, faTop + 11);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  // Fist (closed)
+  ctx.fillStyle = p.flash > 0 ? '#ffaaaa' : '#08080e';
+  ctx.beginPath();
+  ctx.arc(armX, faTop + 13, 2.5, 0, TAU);
+  ctx.fill();
 }
 
 function drawArmor(p) {
   const top = -p.h + 18;
   const bottom = -22;
   const eq = getEquipPalette();
+  const flash = p.flash > 0;
+
+  // Outer silhouette (gives the chest depth)
+  ctx.fillStyle = flash ? '#ffaaaa' : '#04020a';
+  roundRect(-17, top - 1, 34, bottom - top + 2, 5);
+  ctx.fill();
+
   // Body plate gradient
   const grad = ctx.createLinearGradient(0, top, 0, bottom);
-  grad.addColorStop(0, p.flash > 0 ? '#ffffff' : eq.armorBase);
-  grad.addColorStop(0.5, p.flash > 0 ? '#ffaaaa' : eq.armorMid);
-  grad.addColorStop(1, p.flash > 0 ? '#ffaaaa' : '#0e0a14');
+  grad.addColorStop(0, flash ? '#ffffff' : eq.armorBase);
+  grad.addColorStop(0.5, flash ? '#ffaaaa' : eq.armorMid);
+  grad.addColorStop(1, flash ? '#ffaaaa' : '#0e0a14');
   ctx.fillStyle = grad;
   roundRect(-16, top, 32, bottom - top, 4);
   ctx.fill();
-  // Tier 2/3: extra plate ridges (silver/gold lines across chest)
+
+  // Inner chest split line (gives chiselled chest plate look)
+  ctx.strokeStyle = flash ? '#fff' : 'rgba(0, 0, 0, 0.6)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(0, top + 4);
+  ctx.lineTo(0, bottom - 4);
+  ctx.stroke();
+
+  // Side rivets (4 down each side)
+  ctx.fillStyle = flash ? '#fff' : eq.armorBelt;
+  for (let i = 0; i < 4; i++) {
+    const ry = top + 6 + i * ((bottom - top - 10) / 3);
+    ctx.beginPath(); ctx.arc(-13, ry, 1.2, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(13, ry, 1.2, 0, TAU); ctx.fill();
+  }
+
+  // Tier 2/3: extra plate ridges
   if (eq.armor >= 2) {
     ctx.strokeStyle = eq.armorAccent;
     ctx.lineWidth = 1;
@@ -3327,27 +3821,59 @@ function drawArmor(p) {
     ctx.moveTo(-15, bottom - 8); ctx.lineTo(15, bottom - 8);
     ctx.stroke();
   }
-  // Chest V crest
-  ctx.fillStyle = p.flash > 0 ? '#ffd0d0' : eq.armorAccent;
+
+  // Pulsing rune on chest (always visible — signature element)
+  const runePulse = 0.55 + Math.sin(game.t * 2.3) * 0.35;
+  const runeColor = eq.crestColor;
+  // Rune halo
+  const runeGlow = ctx.createRadialGradient(0, top + 14, 1, 0, top + 14, 14);
+  runeGlow.addColorStop(0, `rgba(255, 60, 50, ${runePulse * 0.5})`);
+  runeGlow.addColorStop(1, 'rgba(255, 60, 50, 0)');
+  ctx.fillStyle = runeGlow;
+  ctx.fillRect(-14, top + 4, 28, 22);
+  // Rune shape: inverted triangle + slash (cross-like sigil)
+  ctx.fillStyle = flash ? '#fff' : runeColor;
   ctx.beginPath();
-  ctx.moveTo(0, top + 6);
-  ctx.lineTo(-10, top + 22);
-  ctx.lineTo(-6, top + 26);
+  ctx.moveTo(-5, top + 8);
+  ctx.lineTo(5, top + 8);
   ctx.lineTo(0, top + 18);
-  ctx.lineTo(6, top + 26);
-  ctx.lineTo(10, top + 22);
   ctx.closePath();
   ctx.fill();
-  // Crest gem (shifts with armor tier)
-  ctx.fillStyle = eq.crestColor;
-  ctx.fillRect(-1.5, top + 10, 3, 8);
+  // Vertical bar across triangle
+  ctx.fillRect(-0.8, top + 6, 1.6, 14);
+  // Tiny side ticks
+  ctx.fillRect(-4, top + 12, 2, 1);
+  ctx.fillRect(2, top + 12, 2, 1);
+
+  // V-crest (chevron pointing down, framing the rune)
+  ctx.strokeStyle = flash ? '#ffd0d0' : eq.armorAccent;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-10, top + 22);
+  ctx.lineTo(0, top + 28);
+  ctx.lineTo(10, top + 22);
+  ctx.stroke();
+
   // Belt
   ctx.fillStyle = '#1a0810';
-  ctx.fillRect(-16, bottom - 4, 32, 4);
-  // Belt buckle
-  ctx.fillStyle = eq.armorBelt;
-  ctx.fillRect(-3, bottom - 4, 6, 4);
-  // Tier 3: gold trim along bottom edge
+  ctx.fillRect(-17, bottom - 4, 34, 5);
+  // Belt buckle (skull stylized)
+  ctx.fillStyle = flash ? '#fff' : eq.armorBelt;
+  ctx.fillRect(-4, bottom - 4, 8, 5);
+  ctx.fillStyle = '#08040a';
+  ctx.fillRect(-2.5, bottom - 3, 1.5, 1.5);
+  ctx.fillRect(1, bottom - 3, 1.5, 1.5);
+  ctx.fillRect(-1, bottom - 1, 2, 1);
+  // Hanging belt pouch / loincloth strip (small)
+  ctx.fillStyle = flash ? '#ffd0d0' : '#5a1818';
+  ctx.beginPath();
+  ctx.moveTo(-6, bottom + 1);
+  ctx.lineTo(-3, bottom + 8);
+  ctx.lineTo(3, bottom + 8);
+  ctx.lineTo(6, bottom + 1);
+  ctx.closePath();
+  ctx.fill();
+  // Tier 3: gold trim along top edge
   if (eq.armor === 3) {
     ctx.fillStyle = '#ffd860';
     ctx.fillRect(-16, top + 1, 32, 1);
@@ -3356,19 +3882,54 @@ function drawArmor(p) {
 
 function drawPauldrons(p) {
   const top = -p.h + 18;
-  ctx.fillStyle = p.flash > 0 ? '#ffaaaa' : '#1a1422';
-  ctx.beginPath();
-  ctx.ellipse(-18, top + 4, 10, 8, 0, 0, TAU);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(18, top + 4, 10, 8, 0, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = p.flash > 0 ? '#ffd0d0' : '#3a2a3a';
+  const eq = getEquipPalette();
+  const flash = p.flash > 0;
+
   for (const side of [-1, 1]) {
+    // Layered shadow under pauldron (depth)
+    ctx.fillStyle = flash ? '#ffaaaa' : '#04020a';
     ctx.beginPath();
-    ctx.moveTo(side * 20, top - 2);
-    ctx.lineTo(side * 28, top - 8);
-    ctx.lineTo(side * 22, top + 2);
+    ctx.ellipse(side * 19, top + 5, 12, 9, 0, 0, TAU);
+    ctx.fill();
+
+    // Pauldron base (large dome)
+    const pg = ctx.createRadialGradient(side * 18, top + 1, 1, side * 18, top + 4, 12);
+    pg.addColorStop(0, flash ? '#fff' : eq.armorBase);
+    pg.addColorStop(1, flash ? '#ffaaaa' : '#08040a');
+    ctx.fillStyle = pg;
+    ctx.beginPath();
+    ctx.ellipse(side * 18, top + 4, 11, 9, 0, 0, TAU);
+    ctx.fill();
+
+    // Pauldron rim (lighter band on top)
+    ctx.strokeStyle = flash ? '#ffd0d0' : eq.armorAccent;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.ellipse(side * 18, top + 4, 11, 9, 0, Math.PI * 1.1, Math.PI * 1.9);
+    ctx.stroke();
+
+    // Top spike (large)
+    ctx.fillStyle = flash ? '#ffd0d0' : eq.armorAccent;
+    ctx.beginPath();
+    ctx.moveTo(side * 22, top - 2);
+    ctx.lineTo(side * 30, top - 12);
+    ctx.lineTo(side * 24, top + 2);
+    ctx.closePath();
+    ctx.fill();
+    // Spike highlight
+    ctx.strokeStyle = flash ? '#fff' : 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(side * 22, top - 2);
+    ctx.lineTo(side * 30, top - 12);
+    ctx.stroke();
+
+    // Mini secondary spike (front)
+    ctx.fillStyle = flash ? '#ffd0d0' : '#1a0a12';
+    ctx.beginPath();
+    ctx.moveTo(side * 14, top - 2);
+    ctx.lineTo(side * 18, top - 7);
+    ctx.lineTo(side * 17, top + 1);
     ctx.closePath();
     ctx.fill();
   }
@@ -3397,8 +3958,26 @@ function getEquipPalette() {
 function drawHelm(p, walk) {
   const top = -p.h + 2;
   const eq = getEquipPalette();
-  // Base helm
-  ctx.fillStyle = p.flash > 0 ? '#ffffff' : eq.helmBase;
+  const flash = p.flash > 0;
+
+  // Outer silhouette (helmet depth)
+  ctx.fillStyle = flash ? '#ffaaaa' : '#02020a';
+  ctx.beginPath();
+  ctx.moveTo(-14, top + 25);
+  ctx.lineTo(-14, top + 7);
+  ctx.quadraticCurveTo(0, top - 5, 14, top + 7);
+  ctx.lineTo(14, top + 25);
+  ctx.lineTo(p.facing * 10, top + 30);
+  ctx.lineTo(-p.facing * 10, top + 30);
+  ctx.closePath();
+  ctx.fill();
+
+  // Base helm with gradient (top brighter than chin)
+  const hg = ctx.createLinearGradient(0, top - 2, 0, top + 28);
+  hg.addColorStop(0, flash ? '#ffffff' : eq.helmBase);
+  hg.addColorStop(0.6, flash ? '#ffaaaa' : eq.helmAccent);
+  hg.addColorStop(1, flash ? '#ffaaaa' : '#04040a');
+  ctx.fillStyle = hg;
   ctx.beginPath();
   ctx.moveTo(-13, top + 24);
   ctx.lineTo(-13, top + 8);
@@ -3408,55 +3987,113 @@ function drawHelm(p, walk) {
   ctx.lineTo(-p.facing * 9, top + 28);
   ctx.closePath();
   ctx.fill();
+
+  // Brow ridge (menacing brow shadow)
+  ctx.fillStyle = flash ? '#fff' : '#000';
+  ctx.beginPath();
+  ctx.moveTo(-12, top + 12);
+  ctx.quadraticCurveTo(0, top + 8, 12, top + 12);
+  ctx.lineTo(11, top + 14);
+  ctx.quadraticCurveTo(0, top + 11, -11, top + 14);
+  ctx.closePath();
+  ctx.fill();
+
+  // Inner dark eye socket
+  ctx.fillStyle = '#000';
+  ctx.fillRect(-10, top + 13, 20, 7);
+
   // Helm trim band (only with equipment)
   if (eq.helmTrim) {
-    ctx.fillStyle = p.flash > 0 ? '#ffd0d0' : eq.helmTrim;
+    ctx.fillStyle = flash ? '#ffd0d0' : eq.helmTrim;
     ctx.fillRect(-13, top + 22, 26, 2);
   }
-  // Horns
-  ctx.fillStyle = p.flash > 0 ? '#ffaaaa' : eq.helmAccent;
+
+  // Nose guard / face strip (vertical center bar from brow down to chin)
+  ctx.fillStyle = flash ? '#fff' : eq.helmAccent;
+  ctx.fillRect(-1.5, top + 12, 3, 16);
+  ctx.fillStyle = flash ? '#fff' : 'rgba(255, 255, 255, 0.2)';
+  ctx.fillRect(-0.5, top + 13, 1, 14);
+
+  // Chin grille (3 vertical bars on lower jaw)
+  ctx.fillStyle = flash ? '#fff' : eq.helmAccent;
+  for (let i = -1; i <= 1; i++) {
+    if (i === 0) continue; // skip center (nose guard already there)
+    ctx.fillRect(i * 5 - 0.6, top + 21, 1.2, 7);
+  }
+
+  // Horns (more curved + thicker)
+  ctx.fillStyle = flash ? '#ffaaaa' : eq.helmAccent;
   ctx.beginPath();
-  ctx.moveTo(-12, top + 8);
-  ctx.quadraticCurveTo(-22, top - 2, -18, top - 14);
-  ctx.quadraticCurveTo(-12, top - 4, -10, top + 6);
+  ctx.moveTo(-13, top + 8);
+  ctx.quadraticCurveTo(-26, top - 4, -20, top - 18);
+  ctx.quadraticCurveTo(-12, top - 6, -10, top + 6);
   ctx.closePath();
   ctx.fill();
   ctx.beginPath();
-  ctx.moveTo(12, top + 8);
-  ctx.quadraticCurveTo(22, top - 2, 18, top - 14);
-  ctx.quadraticCurveTo(12, top - 4, 10, top + 6);
+  ctx.moveTo(13, top + 8);
+  ctx.quadraticCurveTo(26, top - 4, 20, top - 18);
+  ctx.quadraticCurveTo(12, top - 6, 10, top + 6);
   ctx.closePath();
   ctx.fill();
+
+  // Horn ridges (3 small dark notches per horn for texture)
+  ctx.fillStyle = flash ? '#ffd0d0' : '#08040a';
+  for (let i = 0; i < 3; i++) {
+    const t2 = 0.3 + i * 0.2;
+    ctx.fillRect(-22 + i * 2, top - 8 + i * 4, 3, 0.8);
+    ctx.fillRect(20 - i * 2, top - 8 + i * 4, 3, 0.8);
+  }
+
   // Horn tips with trim color (high tier)
   if (eq.helmTrim && eq.helmet >= 2) {
     ctx.fillStyle = eq.helmTrim;
     ctx.beginPath();
-    ctx.arc(-19, top - 12, 2.5, 0, TAU);
-    ctx.arc(19, top - 12, 2.5, 0, TAU);
+    ctx.arc(-21, top - 16, 2.8, 0, TAU);
+    ctx.arc(21, top - 16, 2.8, 0, TAU);
     ctx.fill();
   }
+
   // Tier 3: gold crown spikes between horns
   if (eq.helmet === 3) {
     ctx.fillStyle = '#ffe080';
     for (let i = -1; i <= 1; i++) {
       ctx.beginPath();
       ctx.moveTo(i * 5 - 1.5, top + 2);
-      ctx.lineTo(i * 5, top - 6);
+      ctx.lineTo(i * 5, top - 7);
       ctx.lineTo(i * 5 + 1.5, top + 2);
       ctx.fill();
     }
   }
-  // Visor glow (color shifts with helm tier)
-  const glowAlpha = 0.7 + Math.sin(game.t * 6) * 0.2;
-  const glow = ctx.createRadialGradient(p.facing * 1, top + 16, 1, p.facing * 1, top + 16, 14);
-  glow.addColorStop(0, `rgba(${eq.visorRGB}, ${glowAlpha * 0.7})`);
+
+  // Visor / eye glow (glowing slit between brow and nose-guard)
+  const glowAlpha = 0.75 + Math.sin(game.t * 6) * 0.22;
+  const glow = ctx.createRadialGradient(p.facing * 1, top + 16, 1, p.facing * 1, top + 16, 18);
+  glow.addColorStop(0, `rgba(${eq.visorRGB}, ${glowAlpha * 0.85})`);
   glow.addColorStop(1, `rgba(${eq.visorRGB}, 0)`);
   ctx.fillStyle = glow;
-  ctx.fillRect(-16, top + 6, 32, 22);
+  ctx.fillRect(-18, top + 5, 36, 26);
+
+  // Two eye slits (left + right of nose-guard) — more menacing than a single bar
   ctx.fillStyle = `rgb(${eq.visorRGB})`;
-  ctx.fillRect(p.facing * 1 - 8, top + 14, 16, 2);
+  ctx.fillRect(-9 + p.facing * 0.5, top + 15, 6, 2.5);
+  ctx.fillRect(3 + p.facing * 0.5, top + 15, 6, 2.5);
+  // Hot core (white center of each slit)
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(p.facing * 1 - 6, top + 14, 12, 1);
+  ctx.fillRect(-8 + p.facing * 0.5, top + 15.5, 4, 1.2);
+  ctx.fillRect(4 + p.facing * 0.5, top + 15.5, 4, 1.2);
+
+  // Tiny eye-glow particle drift (occasional)
+  if (Math.random() < 0.06) {
+    game.particles.push({
+      x: p.x + p.facing * rand(-4, 4),
+      y: p.y + (top + 16) - rand(0, 4),
+      vx: p.facing * rand(-5, 15),
+      vy: rand(-30, -10),
+      life: 0.5, maxLife: 0.5,
+      color: `rgba(${eq.visorRGB}, 0.8)`,
+      size: 1.4,
+    });
+  }
 }
 
 function drawPlayerWeapon(p) {
@@ -4799,12 +5436,20 @@ function drawParticles() {
 }
 
 function drawDamageNums() {
-  ctx.font = 'bold 16px sans-serif';
   ctx.textAlign = 'center';
   for (const dn of game.damageNums) {
-    const a = dn.life / dn.maxLife;
+    const a = clamp(dn.life / dn.maxLife, 0, 1);
+    const size = dn.crit ? 26 : (dn.big ? 21 : 16);
+    ctx.font = `bold ${size}px sans-serif`;
     ctx.globalAlpha = a;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    // Outline glow for crit
+    if (dn.crit) {
+      ctx.fillStyle = 'rgba(255, 200, 60, 0.4)';
+      ctx.fillText(dn.text, sX(dn.x), dn.y - 2);
+      ctx.fillStyle = 'rgba(255, 200, 60, 0.4)';
+      ctx.fillText(dn.text, sX(dn.x), dn.y + 2);
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
     ctx.fillText(dn.text, sX(dn.x) + 1, dn.y + 1);
     ctx.fillStyle = dn.color;
     ctx.fillText(dn.text, sX(dn.x), dn.y);
@@ -4817,17 +5462,48 @@ function drawTorchOverlay() {
   const p = game.player;
   const cx = sX(p.x);
   const cy = p.y - p.h * 0.5;
-  const grad = ctx.createRadialGradient(cx, cy, 80, cx, cy, Math.max(W, H) * 0.7);
+  // Light radius pulses gently and flashes brighter on attack/combo
+  const flicker = 1 + Math.sin(game.t * 6) * 0.05;
+  const attackPulse = p.attackTimer > 0 ? 1.25 : 1;
+  const comboBoost = 1 + Math.min(0.4, game.combo * 0.015);
+  const innerR = 80 * flicker * attackPulse * comboBoost;
+  const outerR = Math.max(W, H) * 0.7;
+  const grad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR);
   grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
-  grad.addColorStop(0.4, 'rgba(0, 0, 0, 0.35)');
-  grad.addColorStop(1, 'rgba(0, 0, 0, 0.85)');
+  grad.addColorStop(0.35, 'rgba(0, 0, 0, 0.32)');
+  grad.addColorStop(1, 'rgba(0, 0, 0, 0.88)');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
-  const warm = ctx.createRadialGradient(cx, cy, 20, cx, cy, 220);
-  warm.addColorStop(0, 'rgba(255, 100, 50, 0.18)');
-  warm.addColorStop(1, 'rgba(255, 100, 50, 0)');
+
+  // Biome-tinted ambient warm aura
+  const biome = getBiome();
+  const auraColor = biome.id === 'crypts' ? '120, 220, 140'
+    : biome.id === 'caves' ? '120, 180, 240'
+    : biome.id === 'library' ? '180, 120, 220'
+    : biome.id === 'forge' ? '255, 90, 30'
+    : '255, 100, 50';
+  const auraR = 220 * flicker * attackPulse;
+  const warm = ctx.createRadialGradient(cx, cy, 20, cx, cy, auraR);
+  warm.addColorStop(0, `rgba(${auraColor}, ${0.22 * attackPulse})`);
+  warm.addColorStop(1, `rgba(${auraColor}, 0)`);
   ctx.fillStyle = warm;
   ctx.fillRect(0, 0, W, H);
+
+  // Crit/kill flash (white) — driven by flashFx
+  if (game.flashFx > 0) {
+    ctx.fillStyle = `rgba(255, 240, 200, ${Math.min(0.35, game.flashFx)})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Boss approach warning (red edge pulse)
+  if (game.bossWarning > 0.05 && !game.bossActive) {
+    const pulse = (Math.sin(game.t * 5) * 0.5 + 0.5);
+    const edge = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.7);
+    edge.addColorStop(0, 'rgba(180, 0, 0, 0)');
+    edge.addColorStop(1, `rgba(220, 20, 20, ${0.18 * game.bossWarning * pulse + 0.06 * game.bossWarning})`);
+    ctx.fillStyle = edge;
+    ctx.fillRect(0, 0, W, H);
+  }
 }
 
 function roundRect(x, y, w, h, r) {
@@ -4883,6 +5559,18 @@ function startGame() {
   game.boss = null;
   game.bossNextAt = 250;
   game.bossesDefeated = 0;
+  game.combo = 0;
+  game.comboTimer = 0;
+  game.comboBest = 0;
+  game.hitstop = 0;
+  game.flashFx = 0;
+  game.bossWarning = 0;
+  game.bossWarned = false;
+  game.chestSpawnedAt = 0;
+  game.chest = null;
+  if (comboHud) comboHud.classList.remove('visible', 'hot', 'fire');
+  if (bossWarningEl) bossWarningEl.classList.remove('visible');
+  if (lowHpVignette) lowHpVignette.classList.remove('visible');
   game.unlockedWeapons = new Set(['sword', 'bow', 'hammer']);
   game.upgrades = {
     damageMul: RING_DMG[game.equipment.ring] || 1,
