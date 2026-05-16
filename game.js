@@ -2672,9 +2672,15 @@ function drawMidSilhouettes(biome) {
           ctx.fillRect(x + 14, base - 50, 4, 4);
         }
       } else if (seed < 0.85) {
-        // Lectern with floating candle
+        // Lectern (reading stand) with a real candle on top
+        // Stand base
         ctx.fillStyle = '#0c0418';
-        ctx.fillRect(x + 8, base - 28, 18, 28);
+        ctx.fillRect(x + 14, base - 28, 6, 28);
+        // Wide foot
+        ctx.fillStyle = '#06020c';
+        ctx.fillRect(x + 8, base - 4, 18, 4);
+        // Sloped reading surface
+        ctx.fillStyle = '#1a0a24';
         ctx.beginPath();
         ctx.moveTo(x + 6, base - 32);
         ctx.lineTo(x + 28, base - 38);
@@ -2682,13 +2688,34 @@ function drawMidSilhouettes(biome) {
         ctx.lineTo(x + 6, base - 28);
         ctx.closePath();
         ctx.fill();
-        // Floating purple flame above
-        const pulse = 0.5 + Math.sin(game.t * 4 + seed * 6) * 0.4;
-        const grad = ctx.createRadialGradient(x + 17, base - 48, 0.5, x + 17, base - 48, 10);
-        grad.addColorStop(0, `rgba(220, 140, 255, ${pulse})`);
-        grad.addColorStop(1, 'rgba(120, 60, 200, 0)');
+        // Open book on lectern
+        ctx.fillStyle = '#d8c890';
+        ctx.fillRect(x + 10, base - 34, 14, 4);
+        ctx.fillStyle = '#3a2a1a';
+        ctx.fillRect(x + 16, base - 34, 1, 4);
+        // Candle holder on the corner (attached to lectern, not floating)
+        ctx.fillStyle = '#0a0a0c';
+        ctx.fillRect(x + 26, base - 38, 4, 3);
+        // Candle stick
+        ctx.fillStyle = '#e8dcb0';
+        ctx.fillRect(x + 27, base - 48, 2, 10);
+        // Wick
+        ctx.fillStyle = '#08040a';
+        ctx.fillRect(x + 27.6, base - 50, 0.8, 2);
+        // Purple flame
+        const pulse = 0.5 + Math.sin(game.t * 6 + seed * 6) * 0.35;
+        const grad = ctx.createRadialGradient(x + 28, base - 53, 0.5, x + 28, base - 53, 10);
+        grad.addColorStop(0, `rgba(230, 170, 255, ${pulse})`);
+        grad.addColorStop(0.5, `rgba(160, 80, 220, ${pulse * 0.6})`);
+        grad.addColorStop(1, 'rgba(80, 30, 160, 0)');
         ctx.fillStyle = grad;
-        ctx.fillRect(x + 7, base - 58, 20, 18);
+        ctx.beginPath();
+        ctx.arc(x + 28, base - 53, 10, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = `rgba(240, 210, 255, ${pulse})`;
+        ctx.beginPath();
+        ctx.ellipse(x + 28, base - 52, 1, 3, 0, 0, TAU);
+        ctx.fill();
       }
     } else if (id === 'forge') {
       if (seed < 0.55) {
@@ -2759,30 +2786,14 @@ function drawFarBiome(biome) {
 }
 
 function drawGothicWindow(x, y, w, h) {
-  // STONE NICHE around the window (carved into the wall — gives it weight)
-  ctx.fillStyle = '#0a0810';
-  ctx.fillRect(x - 8, y - w * 0.25, w + 16, h + w * 0.3 + 6);
-  // Stone keystone (top arch trim)
-  ctx.fillStyle = '#26222e';
-  ctx.beginPath();
-  ctx.moveTo(x - 8, y + w * 0.5);
-  ctx.quadraticCurveTo(x + w / 2, y - w * 0.32, x + w + 8, y + w * 0.5);
-  ctx.lineTo(x + w + 4, y + w * 0.5);
-  ctx.quadraticCurveTo(x + w / 2, y - w * 0.2, x - 4, y + w * 0.5);
-  ctx.closePath();
-  ctx.fill();
-  // Stone sill at the bottom
-  ctx.fillStyle = '#1a1622';
-  ctx.fillRect(x - 10, y + h, w + 20, 6);
-  ctx.fillStyle = '#2c2638';
-  ctx.fillRect(x - 10, y + h, w + 20, 2);
+  // STONE NICHE recess (slightly darker — gives the window depth into the wall)
+  ctx.fillStyle = '#06060c';
+  ctx.fillRect(x - 10, y - w * 0.3, w + 20, h + w * 0.35 + 8);
 
-  // Window glass with moonlight gradient
-  const grad = ctx.createLinearGradient(0, y, 0, y + h);
-  grad.addColorStop(0, 'rgba(160, 190, 240, 0.65)');
-  grad.addColorStop(0.5, 'rgba(80, 110, 170, 0.45)');
-  grad.addColorStop(1, 'rgba(30, 50, 90, 0.25)');
-  ctx.fillStyle = grad;
+  // === Stained glass panels ===
+  // We define a clipped arch path and fill with multi-color radial gradient,
+  // then overlay subtle colored panes for the "stained" effect.
+  ctx.save();
   ctx.beginPath();
   ctx.moveTo(x, y + w * 0.5);
   ctx.lineTo(x, y + h);
@@ -2790,28 +2801,156 @@ function drawGothicWindow(x, y, w, h) {
   ctx.lineTo(x + w, y + w * 0.5);
   ctx.quadraticCurveTo(x + w / 2, y - w * 0.2, x, y + w * 0.5);
   ctx.closePath();
+  ctx.clip();
+
+  // Bright divine moonlight base (creates the "from behind" glow)
+  const base = ctx.createRadialGradient(x + w / 2, y + h * 0.6, 1, x + w / 2, y + h * 0.4, w * 1.4);
+  base.addColorStop(0, 'rgba(220, 230, 255, 0.95)');
+  base.addColorStop(0.4, 'rgba(150, 180, 230, 0.75)');
+  base.addColorStop(1, 'rgba(40, 60, 110, 0.55)');
+  ctx.fillStyle = base;
+  ctx.fillRect(x - 10, y - 30, w + 20, h + 40);
+
+  // Stained colored panels (in a leaded pattern). Pick palette pseudo-randomly per window.
+  const seed = ((x * 12345) >>> 0) / 0xFFFFFFFF;
+  const palettes = [
+    ['rgba(180, 40, 50, 0.55)',  'rgba(60, 100, 200, 0.55)', 'rgba(220, 180, 60, 0.5)'],   // crimson / blue / gold
+    ['rgba(80, 160, 120, 0.55)', 'rgba(160, 70, 180, 0.55)', 'rgba(220, 200, 80, 0.45)'],  // green / purple / yellow
+    ['rgba(70, 100, 200, 0.55)', 'rgba(220, 80, 60, 0.50)',  'rgba(180, 180, 220, 0.4)'],  // blue / red / silver
+  ];
+  const pal = palettes[Math.floor(seed * palettes.length) % palettes.length];
+
+  // Diamond panes — 4 columns × 5 rows
+  const cols = 4, rows = 5;
+  const cellW = w / cols;
+  const cellH = h / rows;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const idx = (r * 3 + c * 7 + Math.floor(seed * 17)) % pal.length;
+      ctx.fillStyle = pal[idx];
+      const px = x + c * cellW;
+      const py = y + r * cellH;
+      ctx.fillRect(px, py, cellW, cellH);
+    }
+  }
+
+  // Central rose medallion (a circle of bright glow)
+  const rose = ctx.createRadialGradient(x + w / 2, y + h * 0.35, 1, x + w / 2, y + h * 0.35, w * 0.5);
+  rose.addColorStop(0, 'rgba(255, 230, 180, 0.9)');
+  rose.addColorStop(0.3, 'rgba(220, 160, 80, 0.4)');
+  rose.addColorStop(1, 'rgba(180, 100, 50, 0)');
+  ctx.fillStyle = rose;
+  ctx.fillRect(x - 6, y - 6, w + 12, h * 0.7);
+
+  // Petal-like spokes around the rose (white radial bars)
+  ctx.strokeStyle = 'rgba(255, 240, 200, 0.4)';
+  ctx.lineWidth = 1.2;
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * TAU;
+    ctx.beginPath();
+    ctx.moveTo(x + w / 2, y + h * 0.35);
+    ctx.lineTo(x + w / 2 + Math.cos(a) * w * 0.45, y + h * 0.35 + Math.sin(a) * w * 0.45);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  // === Leaded came (the lead strips between glass panes) ===
+  ctx.strokeStyle = '#08060c';
+  ctx.lineWidth = 1.5;
+  // Vertical mullions
+  for (let c = 1; c < cols; c++) {
+    const px = x + c * (w / cols);
+    ctx.beginPath();
+    ctx.moveTo(px, y + Math.max(0, (cols === 4 && c === 2) ? 0 : w * 0.5 * (1 - c / cols)));
+    ctx.lineTo(px, y + h);
+    ctx.stroke();
+  }
+  // Horizontal transoms
+  for (let r = 1; r < rows; r++) {
+    ctx.beginPath();
+    ctx.moveTo(x, y + r * (h / rows));
+    ctx.lineTo(x + w, y + r * (h / rows));
+    ctx.stroke();
+  }
+
+  // === Stone frame around the opening (the "cut" through the wall) ===
+  // Outer arch trim (light stone)
+  ctx.fillStyle = '#3a3344';
+  ctx.beginPath();
+  ctx.moveTo(x - 10, y + w * 0.5 + 4);
+  ctx.quadraticCurveTo(x + w / 2, y - w * 0.35, x + w + 10, y + w * 0.5 + 4);
+  ctx.lineTo(x + w + 4, y + w * 0.5);
+  ctx.quadraticCurveTo(x + w / 2, y - w * 0.2, x - 4, y + w * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  // Inner arch shadow (creates a real "carved" feel)
+  ctx.strokeStyle = '#06040a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, y + w * 0.5);
+  ctx.quadraticCurveTo(x + w / 2, y - w * 0.2, x + w, y + w * 0.5);
+  ctx.stroke();
+  // Side stone trim
+  ctx.fillStyle = '#3a3344';
+  ctx.fillRect(x - 8, y + w * 0.5, 4, h - w * 0.5);
+  ctx.fillRect(x + w + 4, y + w * 0.5, 4, h - w * 0.5);
+  ctx.fillStyle = '#1a1622';
+  ctx.fillRect(x - 8, y + w * 0.5, 1, h - w * 0.5);
+  ctx.fillRect(x + w + 6, y + w * 0.5, 1, h - w * 0.5);
+
+  // Bottom stone sill (with shadow below)
+  ctx.fillStyle = '#3a3344';
+  ctx.fillRect(x - 12, y + h, w + 24, 6);
+  ctx.fillStyle = '#5a5260';
+  ctx.fillRect(x - 12, y + h, w + 24, 2);
+  ctx.fillStyle = '#06040a';
+  ctx.fillRect(x - 12, y + h + 6, w + 24, 2);
+
+  // Keystone at top of arch (carved trapezoid)
+  ctx.fillStyle = '#4a4458';
+  ctx.beginPath();
+  ctx.moveTo(x + w / 2 - 6, y - w * 0.18);
+  ctx.lineTo(x + w / 2 + 6, y - w * 0.18);
+  ctx.lineTo(x + w / 2 + 4, y - w * 0.05);
+  ctx.lineTo(x + w / 2 - 4, y - w * 0.05);
+  ctx.closePath();
   ctx.fill();
 
-  // Cross divider (lead came)
-  ctx.fillStyle = '#04040a';
-  ctx.fillRect(x + w / 2 - 1.5, y, 3, h);
-  ctx.fillRect(x, y + h * 0.45, w, 2);
-  ctx.fillRect(x, y + h * 0.72, w, 2);
-
-  // Inner pointed-arch frame line
-  ctx.strokeStyle = '#04040a';
-  ctx.lineWidth = 2.5;
+  // === Volumetric light shaft entering the room ===
+  // Beams that come down-and-in from the window, fading toward the floor.
+  const shaft = ctx.createLinearGradient(x + w / 2, y + h * 0.4, x + w / 2 + 14, bandTop + 90);
+  shaft.addColorStop(0, 'rgba(220, 230, 255, 0.35)');
+  shaft.addColorStop(0.6, 'rgba(180, 200, 240, 0.12)');
+  shaft.addColorStop(1, 'rgba(160, 180, 220, 0)');
+  ctx.fillStyle = shaft;
   ctx.beginPath();
-  ctx.moveTo(x - 1, y + w * 0.5);
-  ctx.quadraticCurveTo(x + w / 2, y - w * 0.22, x + w + 1, y + w * 0.5);
-  ctx.stroke();
+  ctx.moveTo(x - 4, y + h);
+  ctx.lineTo(x + w + 4, y + h);
+  ctx.lineTo(x + w + 30, bandTop + 90);
+  ctx.lineTo(x - 30, bandTop + 90);
+  ctx.closePath();
+  ctx.fill();
 
-  // Light spill on the wall around the window (soft halo)
-  const halo = ctx.createRadialGradient(x + w / 2, y + h / 2, 4, x + w / 2, y + h / 2, 70);
-  halo.addColorStop(0, 'rgba(160, 190, 240, 0.15)');
-  halo.addColorStop(1, 'rgba(160, 190, 240, 0)');
+  // Wall glow halo
+  const halo = ctx.createRadialGradient(x + w / 2, y + h / 2, 4, x + w / 2, y + h / 2, 90);
+  halo.addColorStop(0, 'rgba(180, 200, 240, 0.20)');
+  halo.addColorStop(1, 'rgba(160, 180, 220, 0)');
   ctx.fillStyle = halo;
-  ctx.fillRect(x - 30, y - 20, w + 60, h + 50);
+  ctx.fillRect(x - 50, y - 30, w + 100, h + 80);
+
+  // Dust motes drifting through the light shaft
+  if (Math.random() < 0.04) {
+    game.atmoParticles.push({
+      kind: 'paper', // reuse existing kind for simple particle draw
+      x: x + game.cameraX + rand(-w * 0.4, w * 0.4),
+      y: y + rand(0, h * 0.4),
+      vx: rand(-2, 6),
+      vy: rand(8, 20),
+      rot: 0, rotV: 0,
+      life: rand(3, 5), maxLife: 5,
+    });
+  }
 }
 
 function drawCryptNiche(x, baseY) {
@@ -3080,40 +3219,101 @@ function drawGargoyle(x, baseY) {
 }
 
 function drawIronCandelabra(x, baseY) {
-  // Base
+  // Floor shadow under the base
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.beginPath();
+  ctx.ellipse(x, baseY + 2, 22, 5, 0, 0, TAU);
+  ctx.fill();
+
+  // === Heavy weighted base (3-tier) ===
+  // Bottom-most flat plate
   ctx.fillStyle = '#0a0a0c';
-  ctx.fillRect(x - 6, baseY - 4, 12, 4);
-  // Pole
+  ctx.fillRect(x - 18, baseY - 3, 36, 4);
+  // Middle ring (slightly inset)
+  ctx.fillStyle = '#1a1a1e';
+  ctx.fillRect(x - 14, baseY - 7, 28, 5);
+  // Top tier (decorative bevel)
+  ctx.fillStyle = '#0a0a0c';
+  ctx.fillRect(x - 10, baseY - 11, 20, 5);
+  // Highlight on the front edge
+  ctx.fillStyle = '#2a2a30';
+  ctx.fillRect(x - 18, baseY - 3, 36, 1);
+
+  // === Pole (twisted iron, thicker now) ===
   ctx.fillStyle = '#1a1a1c';
-  ctx.fillRect(x - 1, baseY - 60, 2, 56);
-  // Arms
+  ctx.fillRect(x - 2, baseY - 70, 4, 60);
+  // Pole highlight (vertical streak)
+  ctx.fillStyle = '#2a2a30';
+  ctx.fillRect(x - 2, baseY - 70, 1, 60);
+  // Twisted bands (3 small horizontal ridges)
+  ctx.fillStyle = '#0a0a0c';
+  for (let i = 0; i < 3; i++) {
+    ctx.fillRect(x - 3, baseY - 30 - i * 16, 6, 1.5);
+  }
+  // Decorative ornament at mid-pole (small sphere)
+  ctx.fillStyle = '#2a2228';
+  ctx.beginPath();
+  ctx.arc(x, baseY - 40, 4, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#3a3038';
+  ctx.beginPath();
+  ctx.arc(x - 1, baseY - 41, 1.5, 0, TAU);
+  ctx.fill();
+
+  // === Arms (curved iron rods) ===
   ctx.strokeStyle = '#1a1a1c';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  // Left arm
+  ctx.beginPath();
+  ctx.moveTo(x, baseY - 52);
+  ctx.quadraticCurveTo(x - 18, baseY - 60, x - 16, baseY - 72);
+  ctx.stroke();
+  // Right arm
+  ctx.beginPath();
+  ctx.moveTo(x, baseY - 52);
+  ctx.quadraticCurveTo(x + 18, baseY - 60, x + 16, baseY - 72);
+  ctx.stroke();
+  // Arm decorative curls (small inward spirals)
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(x, baseY - 40);
-  ctx.quadraticCurveTo(x - 16, baseY - 50, x - 14, baseY - 60);
-  ctx.moveTo(x, baseY - 40);
-  ctx.quadraticCurveTo(x + 16, baseY - 50, x + 14, baseY - 60);
+  ctx.arc(x - 11, baseY - 62, 3, 0, Math.PI * 1.4);
   ctx.stroke();
-  // Candle holders
-  for (const ox of [-14, 0, 14]) {
-    ctx.fillStyle = '#0a0a0a';
-    ctx.fillRect(x + ox - 2, baseY - 62, 4, 2);
-    // Candle
-    ctx.fillStyle = '#d8d0a8';
-    ctx.fillRect(x + ox - 1, baseY - 70, 2, 8);
+  ctx.beginPath();
+  ctx.arc(x + 11, baseY - 62, 3, Math.PI * -0.4, Math.PI);
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+
+  // === Candle holders (cup + candle + flame) ===
+  for (const ox of [-16, 0, 16]) {
+    // Holder cup
+    ctx.fillStyle = '#0a0a0c';
+    ctx.fillRect(x + ox - 3, baseY - 74, 6, 3);
+    ctx.fillStyle = '#1a1a1e';
+    ctx.fillRect(x + ox - 4, baseY - 74, 8, 1);
+    // Candle (with wax drip)
+    ctx.fillStyle = '#e8dcb0';
+    ctx.fillRect(x + ox - 1.5, baseY - 84, 3, 10);
+    ctx.fillStyle = '#d0c498';
+    ctx.fillRect(x + ox - 1.5, baseY - 74, 3, 2);
+    // Wick
+    ctx.fillStyle = '#08040a';
+    ctx.fillRect(x + ox - 0.4, baseY - 86, 0.8, 2);
     // Green flame
     const flicker = 0.7 + Math.sin(game.t * 8 + x + ox) * 0.3;
-    const grad = ctx.createRadialGradient(x + ox, baseY - 72, 0.5, x + ox, baseY - 72, 9);
-    grad.addColorStop(0, `rgba(160, 255, 180, ${flicker})`);
-    grad.addColorStop(1, 'rgba(60, 200, 100, 0)');
+    const flameY = baseY - 90 - flicker * 1.5;
+    const grad = ctx.createRadialGradient(x + ox, flameY, 0.5, x + ox, flameY, 11);
+    grad.addColorStop(0, `rgba(180, 255, 200, ${flicker})`);
+    grad.addColorStop(0.5, `rgba(120, 230, 150, ${flicker * 0.7})`);
+    grad.addColorStop(1, 'rgba(40, 160, 80, 0)');
     ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.arc(x + ox, baseY - 72, 9, 0, TAU);
+    ctx.arc(x + ox, flameY, 11, 0, TAU);
     ctx.fill();
-    ctx.fillStyle = `rgba(220, 255, 220, ${flicker})`;
+    // Flame core (tear-drop)
+    ctx.fillStyle = `rgba(230, 255, 230, ${flicker})`;
     ctx.beginPath();
-    ctx.ellipse(x + ox, baseY - 72, 1.2, 3, 0, 0, TAU);
+    ctx.ellipse(x + ox, flameY + 1, 1.2, 4, 0, 0, TAU);
     ctx.fill();
   }
 }
@@ -3151,13 +3351,31 @@ function drawTallStalagmite(x, baseY) {
 }
 
 function drawHangingChandelier(x, yT) {
-  // Chain
-  ctx.strokeStyle = '#3a2a40';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(x, 0);
-  ctx.lineTo(x, yT);
-  ctx.stroke();
+  // Ceiling anchor plate (so it's clearly attached to the ceiling)
+  ctx.fillStyle = '#0a0612';
+  ctx.fillRect(x - 8, 0, 16, 4);
+  ctx.fillStyle = '#1a0a24';
+  ctx.fillRect(x - 6, 4, 12, 2);
+
+  // Chain with VISIBLE links (alternating oval shape, top to chandelier)
+  const linkH = 7;
+  for (let cy = 6; cy < yT; cy += linkH) {
+    const horiz = (Math.floor((cy - 6) / linkH) % 2) === 0;
+    ctx.strokeStyle = '#1a0a20';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    if (horiz) ctx.ellipse(x, cy + linkH * 0.5, 3, linkH * 0.5, 0, 0, TAU);
+    else ctx.ellipse(x, cy + linkH * 0.5, 1.5, linkH * 0.5, 0, 0, TAU);
+    ctx.stroke();
+    // Inner highlight
+    ctx.strokeStyle = '#3a1a44';
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    if (horiz) ctx.ellipse(x - 1, cy + linkH * 0.4, 2, linkH * 0.35, 0, 0, TAU);
+    else ctx.ellipse(x - 0.5, cy + linkH * 0.4, 1, linkH * 0.35, 0, 0, TAU);
+    ctx.stroke();
+  }
+
   // Ring
   ctx.strokeStyle = '#1a0a20';
   ctx.lineWidth = 3;
@@ -3192,12 +3410,35 @@ function drawHangingChandelier(x, yT) {
 }
 
 function drawHangingCauldron(x, yT) {
-  // Chain
-  ctx.strokeStyle = '#1a1010';
-  ctx.lineWidth = 1.5;
+  // Ceiling anchor plate
+  ctx.fillStyle = '#0a0606';
+  ctx.fillRect(x - 8, 0, 16, 4);
+  ctx.fillStyle = '#1a0808';
+  ctx.fillRect(x - 6, 4, 12, 2);
+
+  // VISIBLE chain links
+  const linkH = 8;
+  for (let cy = 6; cy < yT; cy += linkH) {
+    const horiz = (Math.floor((cy - 6) / linkH) % 2) === 0;
+    ctx.strokeStyle = '#1a0a08';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (horiz) ctx.ellipse(x, cy + linkH * 0.5, 3.5, linkH * 0.5, 0, 0, TAU);
+    else ctx.ellipse(x, cy + linkH * 0.5, 1.8, linkH * 0.5, 0, 0, TAU);
+    ctx.stroke();
+    ctx.strokeStyle = '#3a1a10';
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    if (horiz) ctx.ellipse(x - 1, cy + linkH * 0.4, 2.4, linkH * 0.35, 0, 0, TAU);
+    else ctx.ellipse(x - 0.5, cy + linkH * 0.4, 1.2, linkH * 0.35, 0, 0, TAU);
+    ctx.stroke();
+  }
+  // Hook above cauldron
+  ctx.strokeStyle = '#1a0a08';
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(x, 0);
-  ctx.lineTo(x, yT);
+  ctx.moveTo(x, yT - 4);
+  ctx.quadraticCurveTo(x, yT + 2, x + 3, yT + 4);
   ctx.stroke();
   // Cauldron body
   ctx.fillStyle = '#1a0a08';
