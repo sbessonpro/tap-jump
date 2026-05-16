@@ -392,6 +392,10 @@ const game = {
   props: [],
   lastPropX: 0,
   atmoParticles: [],
+  creatures: [],            // ambient living things per biome (bats, ghosts, etc.)
+  foreground: [],           // 1st-plane silhouettes that pass IN FRONT of the player
+  worldEvent: null,         // { kind, timer, intensity } — biome-specific events
+  worldEventCooldown: 4,
   cameraX: 0,
   spawnTimer: 0,
   kills: 0,
@@ -2247,6 +2251,10 @@ function update(dt) {
   updateProps();
   updateAtmosphere(dt);
   updateChest(dt);
+  updateCreatures(dt);
+  maybeSpawnForeground();
+  updateForeground(dt);
+  updateWorldEvents(dt);
 
   // Combo timer decay
   if (game.combo > 0) {
@@ -2300,6 +2308,7 @@ function render(dt) {
 
   drawBackground(dt);
   drawEmbers();
+  drawCreaturesBack();    // ambient living things (bats, souls, glowbugs, books, hammers)
   drawGround();
   drawAtmosphere(dt);
   drawProps();
@@ -2315,7 +2324,9 @@ function render(dt) {
 
     drawProjectiles();
     drawParticles();
+    drawForeground();     // 1st-plane hanging things IN FRONT of entities
     drawDamageNums();
+    drawWorldEventOverlay();
     drawTorchOverlay();
   }
 
@@ -3144,6 +3155,648 @@ function drawEmbers() {
 }
 
 // ============ Atmosphere (per biome) ============
+// ============ Ambient creatures (per-biome living things) ============
+function updateCreatures(dt) {
+  const biome = getBiome();
+  const id = biome.id;
+
+  // Spawn rates per biome
+  if (id === 'dungeon' && Math.random() < dt * 0.6) {
+    // Bat flying across (deep background)
+    const fromLeft = Math.random() < 0.5;
+    game.creatures.push({
+      kind: 'bat',
+      x: fromLeft ? game.cameraX - 30 : game.cameraX + W + 30,
+      y: rand(40, bandTop * 0.7),
+      vx: (fromLeft ? 1 : -1) * rand(120, 200),
+      vy: 0,
+      phase: rand(0, TAU),
+      life: 6, maxLife: 6,
+      depth: rand(0.6, 0.95),  // 1 = full size, smaller = farther
+    });
+  } else if (id === 'crypts' && Math.random() < dt * 0.9) {
+    // Wandering soul (drifts upward, fades)
+    game.creatures.push({
+      kind: 'soul',
+      x: game.cameraX + rand(-20, W + 20),
+      y: rand(bandBot - 20, H + 10),
+      vx: rand(-15, 15),
+      vy: rand(-30, -15),
+      phase: rand(0, TAU),
+      life: rand(3, 5), maxLife: 5,
+      size: rand(8, 14),
+    });
+  } else if (id === 'caves' && Math.random() < dt * 2.0) {
+    // Glowbug (small luminous insect, zigzag)
+    game.creatures.push({
+      kind: 'glowbug',
+      x: game.cameraX + rand(-20, W + 20),
+      y: rand(bandTop + 20, bandBot - 10),
+      vx: rand(-50, 50),
+      vy: rand(-25, 25),
+      phase: rand(0, TAU),
+      life: rand(2.5, 4.5), maxLife: 4.5,
+      color: Math.random() < 0.7 ? '120,200,255' : '180,140,255',
+    });
+  } else if (id === 'library' && Math.random() < dt * 0.5) {
+    // Floating spell book (flapping pages)
+    game.creatures.push({
+      kind: 'flybook',
+      x: game.cameraX + rand(-20, W + 20),
+      y: rand(60, bandTop * 0.6),
+      vx: rand(-25, -8),
+      vy: rand(-10, 10),
+      phase: rand(0, TAU),
+      flap: 0,
+      life: rand(4, 7), maxLife: 7,
+    });
+  } else if (id === 'forge' && Math.random() < dt * 0.45) {
+    // Hanging hammer that strikes (background mech)
+    const startX = game.cameraX + W + rand(40, 240);
+    game.creatures.push({
+      kind: 'forgeHammer',
+      x: startX,
+      anchorY: bandTop * 0.3,
+      swing: 0,
+      strikeTimer: rand(1.5, 3.0),
+      life: 14, maxLife: 14,
+      vx: 0,  // stays anchored to world (scrolls naturally)
+    });
+  }
+
+  for (const c of game.creatures) {
+    c.phase += dt * 6;
+    c.life -= dt;
+    if (c.kind === 'bat') {
+      c.x += c.vx * dt;
+      c.y += Math.sin(c.phase * 1.2) * 60 * dt;
+    } else if (c.kind === 'soul') {
+      c.x += c.vx * dt + Math.sin(c.phase) * 12 * dt;
+      c.y += c.vy * dt;
+    } else if (c.kind === 'glowbug') {
+      c.x += c.vx * dt;
+      c.y += c.vy * dt;
+      // direction changes occasionally
+      if (Math.random() < dt * 1.5) c.vx = rand(-50, 50);
+      if (Math.random() < dt * 1.5) c.vy = rand(-25, 25);
+    } else if (c.kind === 'flybook') {
+      c.x += c.vx * dt;
+      c.y += c.vy * dt + Math.sin(c.phase * 0.7) * 15 * dt;
+      c.flap += dt * 8;
+    } else if (c.kind === 'forgeHammer') {
+      c.strikeTimer -= dt;
+      if (c.strikeTimer <= 0) {
+        c.swing = 1; // trigger
+        c.strikeTimer = rand(1.6, 2.6);
+        // Sparks burst at strike
+        for (let i = 0; i < 8; i++) {
+          game.particles.push({
+            x: c.x, y: c.anchorY + 56,
+            vx: rand(-180, 180), vy: rand(-120, -30),
+            life: 0.7, maxLife: 0.7,
+            color: i % 2 ? '#ffcc40' : '#ff7020',
+            size: 2,
+          });
+        }
+      }
+      if (c.swing > 0) c.swing = Math.max(0, c.swing - dt * 4);
+    }
+  }
+  // Cleanup
+  game.creatures = game.creatures.filter(c => c.life > 0 && c.x > game.cameraX - 200 && c.x < game.cameraX + W + 400);
+}
+
+function drawCreaturesBack() {
+  // Drawn between ground and entities (background-ish)
+  for (const c of game.creatures) {
+    const x = sX(c.x);
+    if (c.kind === 'bat') drawBatCreature(c, x);
+    else if (c.kind === 'soul') drawSoul(c, x);
+    else if (c.kind === 'glowbug') drawGlowbug(c, x);
+    else if (c.kind === 'flybook') drawFlybook(c, x);
+    else if (c.kind === 'forgeHammer') drawForgeHammer(c, x);
+  }
+}
+
+function drawBatCreature(c, x) {
+  const a = clamp(c.life / c.maxLife, 0, 1);
+  const flap = Math.sin(c.phase * 3) * 6;
+  const dir = Math.sign(c.vx) || 1;
+  const s = c.depth;
+  ctx.save();
+  ctx.translate(x, c.y);
+  ctx.scale(dir * s, s);
+  ctx.globalAlpha = a * 0.85;
+  // Body
+  ctx.fillStyle = '#08040a';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 3, 4, 0, 0, TAU);
+  ctx.fill();
+  // Wings
+  ctx.beginPath();
+  ctx.moveTo(-2, -1);
+  ctx.quadraticCurveTo(-10, -6 + flap, -16, -2 + flap * 0.4);
+  ctx.quadraticCurveTo(-10, 0, -3, 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(2, -1);
+  ctx.quadraticCurveTo(10, -6 - flap, 16, -2 - flap * 0.4);
+  ctx.quadraticCurveTo(10, 0, 3, 2);
+  ctx.closePath();
+  ctx.fill();
+  // Tiny red eye
+  ctx.fillStyle = `rgba(200, 30, 30, ${a})`;
+  ctx.fillRect(1, -2, 1.2, 1);
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+function drawSoul(c, x) {
+  const a = clamp(c.life / c.maxLife, 0, 1);
+  const pulse = 0.6 + Math.sin(c.phase) * 0.3;
+  // Glow
+  const grad = ctx.createRadialGradient(x, c.y, 1, x, c.y, c.size * 2);
+  grad.addColorStop(0, `rgba(140, 255, 180, ${a * 0.6 * pulse})`);
+  grad.addColorStop(1, 'rgba(60, 200, 100, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x - c.size * 2, c.y - c.size * 2, c.size * 4, c.size * 4);
+  // Ghostly figure (small)
+  ctx.fillStyle = `rgba(180, 255, 200, ${a * 0.5})`;
+  ctx.beginPath();
+  ctx.moveTo(x, c.y - c.size * 0.7);
+  ctx.quadraticCurveTo(x - c.size * 0.5, c.y - c.size * 0.5, x - c.size * 0.4, c.y + c.size * 0.4);
+  ctx.lineTo(x - c.size * 0.2, c.y + c.size * 0.7);
+  ctx.lineTo(x, c.y + c.size * 0.5);
+  ctx.lineTo(x + c.size * 0.2, c.y + c.size * 0.7);
+  ctx.lineTo(x + c.size * 0.4, c.y + c.size * 0.4);
+  ctx.quadraticCurveTo(x + c.size * 0.5, c.y - c.size * 0.5, x, c.y - c.size * 0.7);
+  ctx.closePath();
+  ctx.fill();
+  // Eyes
+  ctx.fillStyle = `rgba(255, 255, 255, ${a * 0.9})`;
+  ctx.fillRect(x - 2, c.y - 2, 1.2, 1.5);
+  ctx.fillRect(x + 1, c.y - 2, 1.2, 1.5);
+}
+
+function drawGlowbug(c, x) {
+  const a = clamp(c.life / c.maxLife, 0, 1);
+  const pulse = 0.5 + Math.sin(c.phase * 2) * 0.4;
+  const grad = ctx.createRadialGradient(x, c.y, 0.5, x, c.y, 10);
+  grad.addColorStop(0, `rgba(${c.color}, ${a * pulse})`);
+  grad.addColorStop(1, `rgba(${c.color}, 0)`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(x - 10, c.y - 10, 20, 20);
+  ctx.fillStyle = `rgba(${c.color}, ${a})`;
+  ctx.beginPath();
+  ctx.arc(x, c.y, 1.5, 0, TAU);
+  ctx.fill();
+}
+
+function drawFlybook(c, x) {
+  const a = clamp(c.life / c.maxLife, 0, 1);
+  const flap = Math.sin(c.flap) * 0.6;
+  ctx.save();
+  ctx.translate(x, c.y);
+  ctx.rotate(Math.sin(c.phase * 0.5) * 0.2);
+  ctx.globalAlpha = a;
+  // Cover
+  ctx.fillStyle = '#3a1a4a';
+  ctx.fillRect(-8, -5, 16, 10);
+  // Pages flapping (above + below cover)
+  ctx.fillStyle = '#e8d8b0';
+  ctx.beginPath();
+  ctx.moveTo(-7, -4);
+  ctx.lineTo(-9 - flap * 4, -7 - flap * 3);
+  ctx.lineTo(7, -4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-7, 4);
+  ctx.lineTo(-9 + flap * 4, 7 + flap * 3);
+  ctx.lineTo(7, 4);
+  ctx.closePath();
+  ctx.fill();
+  // Magical trail
+  ctx.fillStyle = `rgba(200, 140, 255, ${a * 0.4})`;
+  ctx.beginPath();
+  ctx.arc(0, 0, 14, 0, TAU);
+  ctx.fill();
+  // Tiny rune on cover
+  ctx.fillStyle = '#ffd860';
+  ctx.fillRect(-1, -1.5, 2, 3);
+  ctx.restore();
+  ctx.globalAlpha = 1;
+
+  // Page particles trailing
+  if (Math.random() < 0.2) {
+    game.particles.push({
+      x: c.x + rand(-4, 4), y: c.y + rand(-4, 4),
+      vx: rand(-10, -2), vy: rand(-8, 8),
+      life: 0.7, maxLife: 0.7,
+      color: '#d8c890', size: 1.2,
+    });
+  }
+}
+
+function drawForgeHammer(c, x) {
+  const swing = c.swing;
+  const angle = -Math.PI * 0.5 + swing * Math.PI * 0.4 - 0.3;
+  // Chain
+  ctx.strokeStyle = '#3a2a20';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, c.anchorY);
+  // Multi-link chain
+  const headX = x + Math.cos(angle) * 50;
+  const headY = c.anchorY + 50 + Math.sin(angle) * 50;
+  ctx.lineTo(headX, headY);
+  ctx.stroke();
+  // Chain links (dots along the line)
+  for (let i = 1; i <= 6; i++) {
+    const t = i / 7;
+    const lx = x + (headX - x) * t;
+    const ly = c.anchorY + (headY - c.anchorY) * t;
+    ctx.fillStyle = '#1a1010';
+    ctx.beginPath();
+    ctx.arc(lx, ly, 1.6, 0, TAU);
+    ctx.fill();
+  }
+  // Hammer head
+  ctx.fillStyle = '#2a1810';
+  ctx.fillRect(headX - 7, headY - 5, 14, 10);
+  ctx.fillStyle = '#5a3a20';
+  ctx.fillRect(headX - 7, headY - 5, 14, 2);
+  // Anchor point
+  ctx.fillStyle = '#1a0a08';
+  ctx.fillRect(x - 3, c.anchorY - 2, 6, 4);
+  // Glow at head if recently struck
+  if (swing > 0.3) {
+    const grad = ctx.createRadialGradient(headX, headY, 1, headX, headY, 24);
+    grad.addColorStop(0, `rgba(255, 180, 60, ${swing * 0.6})`);
+    grad.addColorStop(1, 'rgba(255, 100, 30, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(headX - 24, headY - 24, 48, 48);
+  }
+}
+
+// ============ Foreground (1st-plane silhouettes) ============
+function maybeSpawnForeground() {
+  const biome = getBiome();
+  const last = game.foreground.length ? game.foreground[game.foreground.length - 1].x : 0;
+  // Spawn one every ~180-280 world pixels ahead of camera
+  if (game.cameraX + W + 80 < last - 60) return;
+  if (Math.random() < 0.02 || game.foreground.length === 0) {
+    const x = Math.max(game.cameraX + W + rand(80, 200), last + rand(180, 320));
+    const types = {
+      dungeon: ['chain', 'banner'],
+      crypts:  ['boneString', 'hangingSkull'],
+      caves:   ['hangingMushroom', 'rootVine'],
+      library: ['scrollRibbon', 'hangingScroll'],
+      forge:   ['hangingTong', 'hangingHammer'],
+    };
+    const list = types[biome.id] || ['chain'];
+    const kind = list[Math.floor(Math.random() * list.length)];
+    game.foreground.push({
+      kind,
+      x,
+      yTop: 0,
+      sway: rand(0, TAU),
+      length: rand(40, 90),
+    });
+  }
+  // Cleanup
+  game.foreground = game.foreground.filter(f => f.x > game.cameraX - 60);
+}
+
+function updateForeground(dt) {
+  for (const f of game.foreground) {
+    f.sway += dt * 1.2;
+  }
+}
+
+function drawForeground() {
+  for (const f of game.foreground) {
+    const x = sX(f.x);
+    if (x < -40 || x > W + 40) continue;
+    const sway = Math.sin(f.sway) * 4;
+    if (f.kind === 'chain') drawFgChain(x, f, sway);
+    else if (f.kind === 'banner') drawFgBanner(x, f, sway);
+    else if (f.kind === 'boneString') drawFgBoneString(x, f, sway);
+    else if (f.kind === 'hangingSkull') drawFgHangingSkull(x, f, sway);
+    else if (f.kind === 'hangingMushroom') drawFgHangingMushroom(x, f, sway);
+    else if (f.kind === 'rootVine') drawFgRootVine(x, f, sway);
+    else if (f.kind === 'scrollRibbon') drawFgScrollRibbon(x, f, sway);
+    else if (f.kind === 'hangingScroll') drawFgHangingScroll(x, f, sway);
+    else if (f.kind === 'hangingTong') drawFgHangingTong(x, f, sway);
+    else if (f.kind === 'hangingHammer') drawFgHangingHammer(x, f, sway);
+  }
+}
+
+function drawFgChain(x, f, sway) {
+  const links = 14;
+  ctx.fillStyle = '#06060c';
+  for (let i = 0; i < links; i++) {
+    const y = i * 8;
+    const sx = sway * (i / links);
+    ctx.beginPath();
+    ctx.ellipse(x + sx, y, 3, 4, 0, 0, TAU);
+    ctx.fill();
+  }
+  // Hook on top
+  ctx.strokeStyle = '#06060c';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.arc(x, 4, 4, 0, Math.PI);
+  ctx.stroke();
+}
+function drawFgBanner(x, f, sway) {
+  // Tall tattered banner hanging from above
+  ctx.fillStyle = '#1a0606';
+  ctx.beginPath();
+  ctx.moveTo(x - 16, 0);
+  ctx.lineTo(x + 16, 0);
+  ctx.lineTo(x + 14 + sway * 0.5, 90);
+  ctx.lineTo(x + 8 + sway * 0.7, 110);
+  ctx.lineTo(x + 2 + sway * 0.7, 96);
+  ctx.lineTo(x - 4 + sway * 0.7, 112);
+  ctx.lineTo(x - 14 + sway * 0.5, 90);
+  ctx.closePath();
+  ctx.fill();
+  // Crest
+  ctx.fillStyle = '#8a2020';
+  ctx.beginPath();
+  ctx.arc(x, 30, 8, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#1a0606';
+  ctx.fillRect(x - 1, 24, 2, 12);
+  ctx.fillRect(x - 5, 28, 10, 2);
+  // Pole
+  ctx.fillStyle = '#08080a';
+  ctx.fillRect(x - 17, -4, 34, 4);
+}
+function drawFgBoneString(x, f, sway) {
+  // Vertical string of bones
+  ctx.strokeStyle = '#1a1410';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x + sway, 80);
+  ctx.stroke();
+  for (let i = 0; i < 5; i++) {
+    const y = 12 + i * 16;
+    const sx = sway * (y / 80);
+    // Bone
+    ctx.fillStyle = '#d8c8a8';
+    ctx.fillRect(x + sx - 4, y, 8, 3);
+    ctx.beginPath(); ctx.arc(x + sx - 4, y + 1.5, 2, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + sx + 4, y + 1.5, 2, 0, TAU); ctx.fill();
+  }
+}
+function drawFgHangingSkull(x, f, sway) {
+  ctx.strokeStyle = '#08080a';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x + sway, 38);
+  ctx.stroke();
+  // Skull
+  ctx.fillStyle = '#d8c8a0';
+  ctx.beginPath();
+  ctx.arc(x + sway, 48, 9, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#08040a';
+  ctx.fillRect(x + sway - 4, 46, 3, 3);
+  ctx.fillRect(x + sway + 1, 46, 3, 3);
+  ctx.fillRect(x + sway - 0.5, 52, 1, 2);
+  // Jaw
+  ctx.fillStyle = '#a89878';
+  ctx.fillRect(x + sway - 5, 54, 10, 3);
+  for (let i = 0; i < 4; i++) {
+    ctx.fillStyle = '#08040a';
+    ctx.fillRect(x + sway - 4 + i * 2.5, 55, 1, 2);
+  }
+}
+function drawFgHangingMushroom(x, f, sway) {
+  // Stalactite with glowing mushroom cluster
+  ctx.fillStyle = '#1a1822';
+  ctx.beginPath();
+  ctx.moveTo(x - 6, 0);
+  ctx.lineTo(x + 6, 0);
+  ctx.lineTo(x + 2 + sway, 38);
+  ctx.lineTo(x - 2 + sway, 38);
+  ctx.closePath();
+  ctx.fill();
+  // Glowing caps
+  const pulse = 0.5 + Math.sin(f.sway * 2) * 0.3;
+  for (let i = 0; i < 3; i++) {
+    const cx = x + sway + (i - 1) * 4;
+    const cy = 36 + i;
+    const grad = ctx.createRadialGradient(cx, cy, 0.5, cx, cy, 12);
+    grad.addColorStop(0, `rgba(140, 220, 255, ${pulse * 0.7})`);
+    grad.addColorStop(1, 'rgba(80, 160, 220, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx - 12, cy - 12, 24, 24);
+    ctx.fillStyle = `rgba(180, 240, 255, ${pulse})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy + 2, 2.5, 0, TAU);
+    ctx.fill();
+  }
+}
+function drawFgRootVine(x, f, sway) {
+  ctx.strokeStyle = '#3a2818';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.quadraticCurveTo(x + sway * 1.5, 40, x + sway, 80);
+  ctx.stroke();
+  // Small leaves
+  ctx.fillStyle = '#2a3a18';
+  for (let i = 1; i < 4; i++) {
+    const t = i / 4;
+    const lx = x + sway * (t + 0.3);
+    const ly = 80 * t;
+    const side = i % 2 ? 1 : -1;
+    ctx.beginPath();
+    ctx.ellipse(lx + side * 5, ly, 5, 2.5, side * 0.4, 0, TAU);
+    ctx.fill();
+  }
+}
+function drawFgScrollRibbon(x, f, sway) {
+  // Magical ribbon with glowing runes
+  ctx.fillStyle = '#5a2a7a';
+  ctx.beginPath();
+  ctx.moveTo(x - 3, 0);
+  ctx.quadraticCurveTo(x + sway * 1.2, 30, x - 3 + sway, 70);
+  ctx.quadraticCurveTo(x + 3 + sway, 60, x + 3, 0);
+  ctx.closePath();
+  ctx.fill();
+  // Runes
+  const pulse = 0.5 + Math.sin(f.sway * 3) * 0.4;
+  ctx.fillStyle = `rgba(220, 180, 255, ${pulse})`;
+  for (let i = 1; i < 4; i++) {
+    const t = i / 4;
+    ctx.fillRect(x - 1 + sway * t, 70 * t - 1, 2, 2);
+  }
+}
+function drawFgHangingScroll(x, f, sway) {
+  ctx.strokeStyle = '#06060c';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x + sway * 0.5, 16);
+  ctx.stroke();
+  // Scroll
+  ctx.fillStyle = '#e8d8b0';
+  ctx.fillRect(x + sway * 0.5 - 5, 16, 10, 30);
+  // Roller
+  ctx.fillStyle = '#3a2818';
+  ctx.fillRect(x + sway * 0.5 - 7, 14, 14, 3);
+  ctx.fillRect(x + sway * 0.5 - 7, 45, 14, 3);
+  // Lines (writing)
+  ctx.fillStyle = '#5a4030';
+  for (let i = 0; i < 4; i++) {
+    ctx.fillRect(x + sway * 0.5 - 3, 20 + i * 5, 6, 0.8);
+  }
+}
+function drawFgHangingTong(x, f, sway) {
+  ctx.strokeStyle = '#06060c';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x + sway, 26);
+  ctx.stroke();
+  // Tongs
+  ctx.strokeStyle = '#3a2010';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(x + sway - 4, 26);
+  ctx.lineTo(x + sway - 7, 50);
+  ctx.moveTo(x + sway + 4, 26);
+  ctx.lineTo(x + sway + 7, 50);
+  ctx.stroke();
+  // Tong heads
+  ctx.fillStyle = '#1a1008';
+  ctx.fillRect(x + sway - 9, 48, 4, 6);
+  ctx.fillRect(x + sway + 5, 48, 4, 6);
+}
+function drawFgHangingHammer(x, f, sway) {
+  ctx.strokeStyle = '#06060c';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x + sway, 30);
+  ctx.stroke();
+  // Shaft
+  ctx.fillStyle = '#3a2010';
+  ctx.fillRect(x + sway - 1.5, 30, 3, 20);
+  // Head
+  ctx.fillStyle = '#1a1008';
+  ctx.fillRect(x + sway - 7, 26, 14, 8);
+  ctx.fillStyle = '#5a3a20';
+  ctx.fillRect(x + sway - 7, 26, 14, 2);
+}
+
+// ============ World events (lightning, rumble, etc.) ============
+function updateWorldEvents(dt) {
+  const biome = getBiome();
+  game.worldEventCooldown -= dt;
+  if (!game.worldEvent && game.worldEventCooldown <= 0) {
+    // Trigger random event for this biome
+    if (biome.id === 'dungeon' && Math.random() < 0.3) {
+      game.worldEvent = { kind: 'lightning', timer: 0.5, intensity: 1, total: 0.5 };
+      audio.bossWarn && audio.bossWarn(); // low rumble (reuse)
+    } else if (biome.id === 'crypts' && Math.random() < 0.3) {
+      game.worldEvent = { kind: 'wail', timer: 2.5, intensity: 1, total: 2.5 };
+    } else if (biome.id === 'caves' && Math.random() < 0.3) {
+      game.worldEvent = { kind: 'rumble', timer: 1.5, intensity: 1, total: 1.5 };
+      game.shake = Math.max(game.shake, 6);
+    } else if (biome.id === 'library' && Math.random() < 0.3) {
+      game.worldEvent = { kind: 'pageStorm', timer: 3.0, intensity: 1, total: 3.0 };
+      // Spawn a swirl of papers
+      for (let i = 0; i < 30; i++) {
+        game.atmoParticles.push({
+          kind: 'paper',
+          x: game.cameraX + rand(-50, W + 50),
+          y: rand(0, bandTop),
+          vx: rand(-60, -15),
+          vy: rand(-30, 30),
+          rot: rand(0, TAU),
+          rotV: rand(-1.5, 1.5),
+          life: rand(3, 5), maxLife: 5,
+        });
+      }
+    } else if (biome.id === 'forge' && Math.random() < 0.3) {
+      game.worldEvent = { kind: 'bellows', timer: 1.5, intensity: 1, total: 1.5 };
+      // Big ember burst
+      for (let i = 0; i < 40; i++) {
+        game.embers.push({
+          x: game.cameraX + rand(0, W),
+          y: rand(bandBot, H),
+          vx: rand(-30, 30),
+          vy: rand(-200, -80),
+          life: rand(1, 2.5), maxLife: 2.5,
+          size: rand(1.5, 3),
+        });
+      }
+    }
+    game.worldEventCooldown = rand(8, 16);
+  }
+  if (game.worldEvent) {
+    game.worldEvent.timer -= dt;
+    if (game.worldEvent.timer <= 0) game.worldEvent = null;
+  }
+}
+
+function drawWorldEventOverlay() {
+  const ev = game.worldEvent;
+  if (!ev) return;
+  const t = ev.timer / ev.total;
+  if (ev.kind === 'lightning') {
+    // Bright flash, decays fast
+    const a = Math.max(0, t) * (Math.random() < 0.5 ? 1 : 0.3);
+    ctx.fillStyle = `rgba(200, 220, 255, ${a * 0.55})`;
+    ctx.fillRect(0, 0, W, H);
+    // Lightning bolt zigzag
+    if (Math.random() < 0.4) {
+      ctx.strokeStyle = `rgba(220, 230, 255, ${a})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      let lx = rand(W * 0.2, W * 0.8);
+      ctx.moveTo(lx, 0);
+      for (let i = 1; i < 6; i++) {
+        lx += rand(-30, 30);
+        ctx.lineTo(lx, (H / 6) * i);
+      }
+      ctx.stroke();
+    }
+  } else if (ev.kind === 'wail') {
+    // Green tinted pulse
+    const pulse = Math.sin((1 - t) * Math.PI) * 0.3;
+    ctx.fillStyle = `rgba(80, 220, 120, ${pulse * 0.18})`;
+    ctx.fillRect(0, 0, W, H);
+  } else if (ev.kind === 'rumble') {
+    // Dust falling from ceiling
+    if (Math.random() < 0.6) {
+      game.particles.push({
+        x: game.cameraX + rand(0, W),
+        y: rand(0, 20),
+        vx: rand(-5, 5), vy: rand(20, 60),
+        life: 1.2, maxLife: 1.2,
+        color: '#3a3028', size: 1.5,
+      });
+    }
+  } else if (ev.kind === 'pageStorm') {
+    // Faint purple tint
+    ctx.fillStyle = `rgba(180, 120, 220, ${Math.max(0, t) * 0.10})`;
+    ctx.fillRect(0, 0, W, H);
+  } else if (ev.kind === 'bellows') {
+    // Warm orange glow flash
+    ctx.fillStyle = `rgba(255, 120, 40, ${Math.max(0, t) * 0.18})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
 function updateAtmosphere(dt) {
   const biome = getBiome();
   const id = biome.id;
@@ -5549,6 +6202,10 @@ function startGame() {
   game.props = [];
   game.lastPropX = 0;
   game.atmoParticles = [];
+  game.creatures = [];
+  game.foreground = [];
+  game.worldEvent = null;
+  game.worldEventCooldown = 4;
   game.cameraX = 0;
   game.spawnTimer = 1.5;
   game.kills = 0;
